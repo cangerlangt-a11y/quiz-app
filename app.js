@@ -1,14 +1,13 @@
 // ==========================================
-// ⚡ Supabase 接続設定（ここをご自身のものに書き換えてください）
+// ⚡ Supabase 接続設定
 // ==========================================
 const SUPABASE_URL = 'https://otwqwuidhkbtfniwpzvf.supabase.co'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90d3F3dWlkaGtidGZuaXdwenZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTA0MjYsImV4cCI6MjA5Njk2NjQyNn0.dtPkiYdqo011OpytX6nCvMqiOzrdpEVZ8oj6NXPIsOE'; 
 
-// 💡 【修正点】名前が被らないように "supabaseClient" に変更しました
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ==========================================
-// 📦 アプリ用変数（LocalStorageの読み込みは廃止し、サーバーと連動します）
+// 📦 アプリ用管理変数
 // ==========================================
 let appData = []; 
 let currentActiveListId = null; 
@@ -28,20 +27,18 @@ const progressText = document.getElementById('progress');
 const previousAnswerArea = document.getElementById('previousAnswerArea');
 
 // 画面読み込み時の初期化
-// 画面読み込み時の初期化
 window.addEventListener('DOMContentLoaded', async () => {
   initInputFieldAutoConversion(document.getElementById('chemInput'));  
   initInputFieldAutoConversion(document.getElementById('newAnswer'));  
   initInputFieldAutoConversion(document.getElementById('modalEditA')); 
   
-  // ✨【新機能】単語帳の名前入力欄でEnterキーが押されたら、自動で作成する
   const newListNameInput = document.getElementById('newListName');
   if (newListNameInput) {
     newListNameInput.addEventListener('keydown', function(event) {
       if (event.key === 'Enter') {
-        if (event.isComposing) return; // 💡 漢字変換を確定するためのEnterキーのときは、作成しない（スルーする）
-        event.preventDefault(); // 画面がリロードされるのを防ぐ
-        createNewList(); // 単語帳を作成する関数を実行！
+        if (event.isComposing) return; 
+        event.preventDefault(); 
+        createNewList(); 
       }
     });
   }
@@ -50,10 +47,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     routeView(window.location.hash);
   });
 
-  // 1. まず最初にSupabaseから最新データをダウンロードする
   await loadAllAppDataFromSupabase();
-
-  // 2. その後、画面の状態（どこを開いていたか）を復旧
   loadViewStateOnly();
 
   if (!window.location.hash || window.location.hash === '#top') {
@@ -63,8 +57,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     routeView(window.location.hash);
   }
 
+  // 自動フォーカス管理（自己採点時は無効化）
   document.addEventListener('click', (e) => {
     if (window.location.hash.startsWith('#quiz') && inputField && !inputField.disabled) {
+      const isSelfMode = document.getElementById('scoreSelf') && document.getElementById('scoreSelf').checked;
+      if (isSelfMode) return;
+
       if (!e.target.closest('button') && e.target !== inputField) {
         inputField.focus();
       }
@@ -73,6 +71,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   document.addEventListener('keydown', (e) => {
     if (window.location.hash.startsWith('#quiz') && inputField && !inputField.disabled) {
+      const isSelfMode = document.getElementById('scoreSelf') && document.getElementById('scoreSelf').checked;
+      if (isSelfMode) return;
+
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (document.activeElement !== inputField) {
           inputField.focus();
@@ -86,7 +87,7 @@ function navigateTo(hash) {
   window.location.hash = hash;
 }
 
-// 🌐 【新機能】Supabaseから全ての部屋と単語を一括取得して appData の形に整える
+// Supabaseデータ取得
 async function loadAllAppDataFromSupabase() {
   const { data: rooms, error: roomError } = await supabaseClient.from('rooms').select('*').order('created_at', { ascending: true });
   if (roomError) { console.error("部屋の取得失敗:", roomError); return; }
@@ -104,6 +105,7 @@ async function loadAllAppDataFromSupabase() {
   });
 }
 
+// ルーティング
 function routeView(hash) {
   document.querySelectorAll('.app-view').forEach(v => v.style.display = 'none');
   isBulkDeleteMode = false; 
@@ -163,6 +165,7 @@ function saveViewState() {
     rangeEnd: document.getElementById('rangeEnd') ? document.getElementById('rangeEnd').value : "1",
     orderType: document.getElementById('orderRandom') && document.getElementById('orderRandom').checked ? 'random' : 'normal',
     maxQuestions: document.getElementById('maxQuestions') ? document.getElementById('maxQuestions').value : "",
+    scoringMode: document.getElementById('scoreSelf') && document.getElementById('scoreSelf').checked ? 'self' : 'auto', 
     currentIndex: currentIndex,
     memoIndex: memoIndex,
     isCardFront: isCardFront,
@@ -195,6 +198,11 @@ function loadViewStateOnly() {
     }
     if (document.getElementById('maxQuestions')) document.getElementById('maxQuestions').value = state.maxQuestions || "";
     
+    if (document.getElementById('scoreSelf')) {
+      if (state.scoringMode === 'self') document.getElementById('scoreSelf').checked = true;
+      else document.getElementById('scoreAuto').checked = true;
+    }
+
     currentIndex = state.currentIndex || 0;
     memoIndex = state.memoIndex || 0;
     isCardFront = (state.isCardFront !== undefined) ? state.isCardFront : true;
@@ -206,6 +214,7 @@ function loadViewStateOnly() {
   }
 }
 
+// トップ画面描画（元のデザイン維持＋全体クリック）
 function renderTopView() {
   const gallery = document.getElementById('listGallery');
   if(!gallery) return;
@@ -214,10 +223,11 @@ function renderTopView() {
   appData.forEach(list => {
     const card = document.createElement('div');
     card.className = "list-card";
+    card.style.cursor = "pointer";
+    card.onclick = () => openNotebook(list.listId);
     
     const infoWrapper = document.createElement('div');
     infoWrapper.className = "list-info";
-    infoWrapper.onclick = () => openNotebook(list.listId);
     infoWrapper.innerHTML = `
       <span class="list-title-text">${list.listName}</span>
       <span class="list-count-badge">${list.items.length} 問収録</span>
@@ -498,6 +508,9 @@ function validateCounter(input) {
   if (val < 1) { input.value = maxVal; } else if (val > maxVal) { input.value = 1; }
 }
 
+// ==========================================
+// 🎴 暗記カード制御
+// ==========================================
 function startMemorizeMode() {
   if (!prepareQuestions()) return;
   memoIndex = 0;
@@ -541,6 +554,9 @@ function backToMainList() {
   navigateTo('#list');
 }
 
+// ==========================================
+// ⏱️ 小テスト（クイズ）
+// ==========================================
 function startQuizMode() {
   if (!prepareQuestions()) return;
   quizHistoryLogs = []; 
@@ -599,25 +615,86 @@ function prepareQuestions() {
   return true;
 }
 
+// デザインを崩さないための丁寧なUI出し分け処理
 function showQuestion() {
   if (autoNextTimer) clearTimeout(autoNextTimer); 
-  inputField.value = ""; inputField.disabled = false;
   
-  const submitBtn = document.getElementById('submitBtn');
-  const resetBtn = document.getElementById('resetBtn');
-  if (submitBtn) submitBtn.disabled = false;
-  if (resetBtn) resetBtn.disabled = false;
+  const isSelfMode = document.getElementById('scoreSelf') && document.getElementById('scoreSelf').checked;
+  const autoArea = document.getElementById('autoScoreArea');
+  const selfArea = document.getElementById('selfScoreArea');
 
   progressText.textContent = `第 ${currentIndex + 1} 問 / 全 ${currentQuestions.length} 問`;
-  document.getElementById('quizBigCardQuestion').textContent = currentQuestions[currentIndex].question;
-  
-  if (lastResultFeedbackHTML) {
-    previousAnswerArea.innerHTML = lastResultFeedbackHTML;
+
+  if (isSelfMode) {
+    // 自己採点表示
+    if (autoArea) autoArea.style.display = 'none';
+    if (previousAnswerArea) previousAnswerArea.style.display = 'none';
+    if (selfArea) {
+      selfArea.style.display = 'block';
+      document.getElementById('showAnswerBtn').style.display = 'inline-block';
+      document.getElementById('selfActionBtns').style.display = 'none';
+    }
+    document.getElementById('quizBigCardQuestion').textContent = currentQuestions[currentIndex].question;
   } else {
-    previousAnswerArea.innerHTML = "";
+    // 自動採点表示
+    if (autoArea) autoArea.style.display = 'block';
+    if (inputField) { inputField.value = ""; inputField.disabled = false; }
+    const submitBtn = document.getElementById('submitBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    if (submitBtn) submitBtn.disabled = false;
+    if (resetBtn) resetBtn.disabled = false;
+    
+    if (previousAnswerArea) previousAnswerArea.style.display = 'block';
+    if (selfArea) selfArea.style.display = 'none';
+
+    document.getElementById('quizBigCardQuestion').textContent = currentQuestions[currentIndex].question;
+    
+    if (lastResultFeedbackHTML) {
+      previousAnswerArea.innerHTML = lastResultFeedbackHTML;
+    } else {
+      previousAnswerArea.innerHTML = "";
+    }
+    if (inputField) inputField.focus();
+  }
+}
+
+function showSelfAnswer() {
+  document.getElementById('showAnswerBtn').style.display = 'none';
+  document.getElementById('selfActionBtns').style.display = 'block';
+  
+  const q = currentQuestions[currentIndex].question;
+  const a = currentQuestions[currentIndex].answer;
+  document.getElementById('quizBigCardQuestion').innerHTML = `
+    ${q}
+    <br>
+    <span style="color:#2196f3; font-size:0.85em; display:block; margin-top:20px; font-weight:bold; background:#e3f2fd; padding:8px; border-radius:6px;">
+      正解：${a}
+    </span>
+  `;
+}
+
+function submitSelfScoring(isCorrect) {
+  let currentQ = currentQuestions[currentIndex];
+  let wrongIds = getSavedWrongIds();
+
+  quizHistoryLogs.push({ 
+    question: currentQ.question, 
+    correctAnswer: currentQ.answer, 
+    userAns: isCorrect ? "⭕ (自己採点)" : "❌ (自己採点)", 
+    isCorrect: isCorrect 
+  });
+
+  if (isCorrect) {
+    wrongIds = wrongIds.filter(id => id !== currentQ.id);
+  } else {
+    wrongQuestions.push(currentQ);
+    if (!wrongIds.includes(currentQ.id)) wrongIds.push(currentQ.id);
   }
   
-  inputField.focus();
+  saveWrongIds(wrongIds);
+  saveViewState();
+  
+  nextQuestion();
 }
 
 function resetQuizInput() {
@@ -710,6 +787,9 @@ function renderReviewRows(logsArray) {
   });
 }
 
+// ==========================================
+// 🧪 化学記号自動変換コアエンジン（#化学タグ連動）
+// ==========================================
 function initInputFieldAutoConversion(targetInput) {
   if (!targetInput) return;
   
@@ -722,11 +802,16 @@ function initInputFieldAutoConversion(targetInput) {
   });
 
   targetInput.addEventListener('input', function() {
+    const foundList = appData.find(l => l.listId === currentActiveListId);
+    const isChemistry = foundList && foundList.listName.includes('#化学');
+    
+    if (!isChemistry) return;
+
     let start = targetInput.selectionStart; 
     let val = targetInput.value;
     
     val = val.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    val = val.replaceAll('；', ';').replaceAll('ー', '-').replaceAll('．', '.').replaceAll('”', '"').replaceAll(' ', ' ');
+    val = val.replaceAll('；', ';').replaceAll('ー', '-').replaceAll('．', '.').replaceAll(' ”', '"').replaceAll(' ', ' ');
     val = val.replaceAll('＋', '+');
 
     const shiftNumbers = { '!': '1', '"': '2', '#': '3', '$': '4', '%': '5', '&': '6', "'": '7', '(': '8', ')': '9' };
@@ -773,10 +858,12 @@ function initInputFieldAutoConversion(targetInput) {
   });
 }
 
-inputField.addEventListener('keydown', function(event) {
-  if (event.key === 'Enter') { 
-    if (event.isComposing) return; 
-    event.preventDefault(); 
-    checkAnswer(); 
-  }
-});
+if (inputField) {
+  inputField.addEventListener('keydown', function(event) {
+    if (event.key === 'Enter') { 
+      if (event.isComposing) return; 
+      event.preventDefault(); 
+      checkAnswer(); 
+    }
+  });
+}
