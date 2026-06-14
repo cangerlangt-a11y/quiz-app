@@ -28,11 +28,24 @@ const progressText = document.getElementById('progress');
 const previousAnswerArea = document.getElementById('previousAnswerArea');
 
 // 画面読み込み時の初期化
+// 画面読み込み時の初期化
 window.addEventListener('DOMContentLoaded', async () => {
   initInputFieldAutoConversion(document.getElementById('chemInput'));  
   initInputFieldAutoConversion(document.getElementById('newAnswer'));  
   initInputFieldAutoConversion(document.getElementById('modalEditA')); 
   
+  // ✨【新機能】単語帳の名前入力欄でEnterキーが押されたら、自動で作成する
+  const newListNameInput = document.getElementById('newListName');
+  if (newListNameInput) {
+    newListNameInput.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') {
+        if (event.isComposing) return; // 💡 漢字変換を確定するためのEnterキーのときは、作成しない（スルーする）
+        event.preventDefault(); // 画面がリロードされるのを防ぐ
+        createNewList(); // 単語帳を作成する関数を実行！
+      }
+    });
+  }
+
   window.addEventListener('hashchange', () => {
     routeView(window.location.hash);
   });
