@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>マルチ単語帳アプリシステム</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <h1 class="app-title" onclick="navigateTo('#top')">🧪 デジタル単語帳マスター</h1>
+
+  <div id="topView" class="app-view" style="display: none;">
+    <div class="top-container">
+      <div class="config-box" style="background-color: #e0f2f1; border-left: 5px solid #009688;">
+        <p class="config-title" style="color: #004d40; margin-bottom: 10px;">📁 新しい単語帳（リスト）を作る</p>
+        <div class="config-form">
+          <input type="text" id="newListName" class="input-style" placeholder="リストの名前（例：無機化学、定期テスト対策）">
+          <button onclick="createNewList()" class="btn btn-create-list">新しい単語帳を作成 ✨</button>
+        </div>
+      </div>
+
+      <div class="config-box">
+        <p class="config-title" style="margin-bottom: 10px;">🗂️ マイ単語帳一覧</p>
+        <div class="list-gallery" id="listGallery"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="mainListView" class="app-view" style="display: none;">
+    <button onclick="navigateTo('#top')" class="btn btn-sub" style="margin-bottom: 15px;">🏠 トップ画面に戻る</button>
+    
+    <div class="title-area">
+      <h2 id="currentListTitle" style="margin:0;">単語帳の名前</h2>
+      <button onclick="editListNameInline()" class="btn-title-edit">✏️ タイトル変更</button>
+    </div>
+
+    <div class="main-layout">
+      <div class="left-column">
+        <div class="config-box" style="background-color: #f3e5f5; border-left: 5px solid #9c27b0;">
+          <p class="config-title" style="color: #7b1fa2; margin-bottom: 10px;">➕ このリストに問題を追加</p>
+          <div class="config-form">
+            <input type="text" id="newQuestion" class="input-style" placeholder="問題（例：塩化水素）" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('newAnswer').focus();}">
+            <input type="text" id="newAnswer" class="input-style" placeholder="答え（自動変換が適用されます）" onkeydown="if(event.key==='Enter'){event.preventDefault(); addNewProblem();}">
+            <button onclick="addNewProblem()" class="btn btn-add">追加保存する ✨</button>
+          </div>
+        </div>
+
+        <div class="config-box">
+          <p class="config-title" style="margin-bottom: 10px;">⚙️ 出題・学習設定</p>
+          <div class="config-form">
+            <div class="mode-section">
+              <label>🛠️ 出題モード：</label><br>
+              <input type="radio" name="modeType" id="modeNormal" checked onclick="toggleModeUI(); saveViewState();"> <label for="modeNormal">通常</label><br>
+              <input type="radio" name="modeType" id="modeWrongList" onclick="toggleModeUI(); saveViewState();"> <label for="modeWrongList">🔥 苦手（現在 <span id="wrongCountLabel">0</span> 問）</label>
+            </div>
+            <div id="normalConfigArea" class="mode-section" style="border-bottom: none;">
+              <label>🎯 出題範囲：</label><br>
+              <input type="number" id="rangeStart" class="counter-input" value="1" onchange="validateCounter(this); saveViewState();"> 問目 ～ 
+              <input type="number" id="rangeEnd" class="counter-input" value="1" onchange="validateCounter(this); saveViewState();"> 問目<br>
+            </div>
+            <div class="mode-section" style="border-bottom: none;">
+              <label>🔀 出題順：</label> 
+              <input type="radio" name="orderType" id="orderNormal" checked onclick="saveViewState()"> <label for="orderNormal">順通り</label> 
+              <input type="radio" name="orderType" id="orderRandom" onclick="saveViewState()"> <label for="orderRandom">ランダム</label>
+            </div>
+            <div class="mode-section" style="border-bottom: none; padding-bottom: 0;">
+              <label>📝 出題数：</label><br>
+              <input type="number" id="maxQuestions" placeholder="全問" class="counter-input" style="width: 80px;" oninput="saveViewState()"> 問
+            </div>
+            <br>
+            <div style="display: flex; justify-content: space-between;">
+              <button onclick="startMemorizeMode()" class="btn btn-mode">🃏 暗記カード</button>
+              <button onclick="startQuizMode()" class="btn btn-mode" style="background-color: #2196f3;">📝 小テスト</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-column">
+        <div class="config-box" style="min-height: 400px;">
+          <div class="config-header-flex">
+            <p class="config-title" id="listTitleLabel">📋 登録されている問題</p>
+            <div id="bulkControlGroup" style="display: flex; gap: 8px; align-items: center;">
+              <button id="bulkDeleteTriggerBtn" onclick="toggleBulkDeleteMode()" class="btn-bulk">🗂️ 単語をまとめて削除</button>
+              <button id="bulkExecuteBtn" onclick="executeBulkDelete()" class="btn-bulk" style="display:none;">選択した単語を削除 🗑️</button>
+              <button id="bulkCancelBtn" onclick="toggleBulkDeleteMode()" class="btn-bulk-cancel" style="display:none;">キャンセル</button>
+            </div>
+          </div>
+          <div class="list-container" id="listContainer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="memorizeView" class="app-view" style="display: none;">
+    <button onclick="backToMainList()" class="btn btn-sub" style="margin-bottom: 15px;">⬅️ 戻る</button>
+    <div class="memorize-container">
+      <p id="memoProgress" style="color: gray; font-weight: bold; margin: 0;">暗記カード</p>
+      <div id="bigCard" class="big-card clickable" onclick="flipBigCard()">ここに問題</div>
+      <p style="color: #888; font-size: 0.9rem; margin-bottom: 20px;">💡 クリックで表裏切り替え</p>
+      <div style="display: flex; justify-content: center; gap: 20px; min-height: 50px;">
+        <div id="memoPrevBtnWrapper" style="width: 110px;">
+          <button onclick="prevMemo()" class="btn btn-sub" style="padding: 12px 20px; width:100%;">◀ 前へ</button>
+        </div>
+        <button onclick="nextMemo()" class="btn btn-action" style="padding: 12px 30px;">次へ ▶</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="quizView" class="app-view" style="display: none;">
+    <button onclick="backToMainList()" class="btn btn-sub" style="margin-bottom: 15px;">⬅️ 戻る</button>
+    <div class="quiz-container">
+      <div id="quizPlayArea">
+        <p id="progress" style="color: gray; font-weight: bold; margin-top: 0; margin-bottom: 10px;"></p>
+        <div class="quiz-inner-card">
+          <div id="quizBigCardQuestion" class="quiz-q-text">問題読み込み中...</div>
+          <div class="quiz-vertical-wrapper">
+            <input type="text" id="chemInput" placeholder="ここに入力" autocomplete="off">
+            <div class="quiz-buttons-row">
+              <button id="resetBtn" onclick="resetQuizInput()" title="入力をリセット">🧹 クリア</button>
+              <button id="submitBtn" onclick="checkAnswer()">解答する ➔</button>
+            </div>
+          </div>
+        </div>
+        <div id="previousAnswerArea" class="previous-answer-box"></div>
+      </div>
+
+      <div id="quizResultArea" style="display: none;">
+        <h2 id="quizFinalScore">結果発表</h2>
+        <div style="margin: 20px 0; display: flex; justify-content: center; gap: 10px;">
+          <button onclick="switchReviewTab('all')" id="tabAllBtn" class="btn btn-action">📋 全問の振り返り</button>
+          <button onclick="switchReviewTab('wrong')" id="tabWrongBtn" class="btn btn-sub">🔥 間違えた問題のみ</button>
+        </div>
+        <div style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #fafafa; border-radius: 6px;">
+          <table class="review-table">
+            <thead>
+              <tr><th>状態</th><th>問題</th><th>正解</th></tr>
+            </thead>
+            <tbody id="reviewTableBody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top: 25px; display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
+          <button onclick="backToMainList()" class="btn btn-sub" style="padding: 12px 30px;">🔙 リストに戻る</button>
+          <button id="retryWrongBtn" onclick="retryQuiz('wrong')" class="btn btn-retry" style="padding: 12px 30px;">🔥 間違えた問題をもう一度</button>
+          <button onclick="retryQuiz('all')" class="btn btn-action" style="padding: 12px 30px;">🔄 全問題をもう一度</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="deleteModal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 style="color: #ef5350;">⚠️ 削除の確認</h3>
+      <p id="deleteModalText">本当に削除しますか？</p>
+      <div class="modal-buttons">
+        <button onclick="closeModal('deleteModal')" class="btn btn-sub">キャンセル</button>
+        <button id="modalConfirmDeleteBtn" class="btn btn-danger">削除する</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="editWordModal" class="modal-overlay">
+    <div class="modal-box">
+      <h3>🛠️ 単語の編集</h3>
+      <div class="modal-flex-inputs">
+        <label><b>問題：</b></label>
+        <input type="text" id="modalEditQ" class="input-style">
+        <label><b>答え（化学式など）：</b></label>
+        <input type="text" id="modalEditA" class="input-style" placeholder="自動変換が適用されます">
+      </div>
+      <div class="modal-buttons">
+        <button onclick="closeModal('editWordModal')" class="btn btn-sub">キャンセル</button>
+        <button id="modalConfirmEditBtn" class="btn btn-action">変更を保存 💾</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="memoEndModal" class="modal-overlay">
+    <div class="modal-box">
+      <h3>🎉 カードを最後まで見ました！</h3>
+      <p>次に行う操作を選んでください。</p>
+      <div class="modal-buttons" style="flex-direction: column; gap: 10px;">
+        <button onclick="restartMemorize()" class="btn btn-action" style="width:100%;">🔄 もう一度最初から見る</button>
+        <button onclick="exitMemorize()" class="btn btn-main" style="width:100%; background-color: #009688; color: white;">📋 この単語帳のリストに戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
