@@ -1,7 +1,7 @@
 // ==========================================
 // ⚡ Supabase 接続設定（ここをご自身のものに書き換えてください）
 // ==========================================
-const SUPABASE_URL = 'https://otwqwuidhkbtfniwpzvf.supabase.co/rest/v1/'; 
+const SUPABASE_URL = 'https://otwqwuidhkbtfniwpzvf.supabase.co'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90d3F3dWlkaGtidGZuaXdwenZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTA0MjYsImV4cCI6MjA5Njk2NjQyNn0.dtPkiYdqo011OpytX6nCvMqiOzrdpEVZ8oj6NXPIsOE'; 
 
 // 💡 【修正点】名前が被らないように "supabaseClient" に変更しました
