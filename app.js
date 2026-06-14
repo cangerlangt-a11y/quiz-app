@@ -1,0 +1,758 @@
+const defaultAppConfig = [];
+
+let appData = JSON.parse(localStorage.getItem('multi_notebook_app_data'));
+if (!appData) { 
+  appData = defaultAppConfig; 
+  localStorage.setItem('multi_notebook_app_data', JSON.stringify(appData)); 
+}
+
+let currentActiveListId = null;
+let quizData = []; 
+let currentQuestions = []; 
+let wrongQuestions = []; 
+let currentIndex = 0; 
+let memoIndex = 0; 
+let isCardFront = true;
+let quizHistoryLogs = []; 
+let lastResultFeedbackHTML = ""; 
+let autoNextTimer = null; 
+let isBulkDeleteMode = false; 
+
+const inputField = document.getElementById('chemInput');
+const progressText = document.getElementById('progress');
+const previousAnswerArea = document.getElementById('previousAnswerArea');
+
+window.addEventListener('DOMContentLoaded', () => {
+  initInputFieldAutoConversion(document.getElementById('chemInput'));  
+  initInputFieldAutoConversion(document.getElementById('newAnswer'));  
+  initInputFieldAutoConversion(document.getElementById('modalEditA')); 
+  
+  window.addEventListener('hashchange', () => {
+    routeView(window.location.hash);
+  });
+
+  loadViewStateOnly();
+
+  if (!window.location.hash || window.location.hash === '#top') {
+    navigateTo('#top');
+    routeView('#top');
+  } else {
+    routeView(window.location.hash);
+  }
+
+  document.addEventListener('click', (e) => {
+    if (window.location.hash.startsWith('#quiz') && inputField && !inputField.disabled) {
+      if (!e.target.closest('button') && e.target !== inputField) {
+        inputField.focus();
+      }
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (window.location.hash.startsWith('#quiz') && inputField && !inputField.disabled) {
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (document.activeElement !== inputField) {
+          inputField.focus();
+        }
+      }
+    }
+  });
+});
+
+function navigateTo(hash) {
+  window.location.hash = hash;
+}
+
+function routeView(hash) {
+  document.querySelectorAll('.app-view').forEach(v => v.style.display = 'none');
+  isBulkDeleteMode = false; 
+  
+  if (document.getElementById('bulkDeleteTriggerBtn')) document.getElementById('bulkDeleteTriggerBtn').style.display = "inline-block";
+  if (document.getElementById('bulkExecuteBtn')) document.getElementById('bulkExecuteBtn').style.display = "none";
+  if (document.getElementById('bulkCancelBtn')) document.getElementById('bulkCancelBtn').style.display = "none";
+
+  if (!hash || hash.startsWith('#top')) {
+    document.getElementById('topView').style.display = 'block';
+    renderTopView();
+  } 
+  else if (hash.startsWith('#list')) {
+    if (!currentActiveListId) { navigateTo('#top'); return; }
+    document.getElementById('mainListView').style.display = 'block';
+    const foundList = appData.find(l => l.listId === currentActiveListId);
+    if (foundList) {
+      document.getElementById('currentListTitle').textContent = foundList.listName;
+      renderMainList();
+      updateWrongCountLabel();
+    }
+  } 
+  else if (hash.startsWith('#memorize')) {
+    if (!currentActiveListId || currentQuestions.length === 0) { navigateTo('#list'); return; }
+    document.getElementById('memorizeView').style.display = 'block';
+    showMemoCard();
+    if (!isCardFront) {
+      const card = document.getElementById('bigCard');
+      card.textContent = currentQuestions[memoIndex].answer;
+      card.classList.add('back-style');
+    }
+  } 
+  else if (hash.startsWith('#quiz')) {
+    if (!currentActiveListId || currentQuestions.length === 0) { navigateTo('#list'); return; }
+    document.getElementById('quizView').style.display = 'block';
+    document.getElementById('quizPlayArea').style.display = 'block';
+    document.getElementById('quizResultArea').style.display = 'none';
+    showQuestion();
+  } 
+  else if (hash.startsWith('#result')) {
+    if (!currentActiveListId) { navigateTo('#top'); return; }
+    document.getElementById('quizView').style.display = 'block';
+    document.getElementById('quizPlayArea').style.display = 'none';
+    document.getElementById('quizResultArea').style.display = 'block';
+    showQuizReviewSummary();
+  }
+}
+
+function saveAppData() { localStorage.setItem('multi_notebook_app_data', JSON.stringify(appData)); }
+function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+function saveViewState() {
+  const state = {
+    listId: currentActiveListId,
+    modeType: document.getElementById('modeWrongList') && document.getElementById('modeWrongList').checked ? 'wrong' : 'normal',
+    rangeStart: document.getElementById('rangeStart') ? document.getElementById('rangeStart').value : "1",
+    rangeEnd: document.getElementById('rangeEnd') ? document.getElementById('rangeEnd').value : "1",
+    orderType: document.getElementById('orderRandom') && document.getElementById('orderRandom').checked ? 'random' : 'normal',
+    maxQuestions: document.getElementById('maxQuestions') ? document.getElementById('maxQuestions').value : "",
+    currentIndex: currentIndex,
+    memoIndex: memoIndex,
+    isCardFront: isCardFront,
+    currentQuestions: currentQuestions,
+    quizHistoryLogs: quizHistoryLogs,
+    lastResultFeedbackHTML: lastResultFeedbackHTML
+  };
+  localStorage.setItem('multi_notebook_view_state', JSON.stringify(state));
+}
+
+function loadViewStateOnly() {
+  const saved = localStorage.getItem('multi_notebook_view_state');
+  if (!saved) return;
+  try {
+    const state = JSON.parse(saved);
+    currentActiveListId = state.listId;
+    const foundList = appData.find(l => l.listId === currentActiveListId);
+    if (foundList) quizData = foundList.items;
+
+    if (document.getElementById('modeWrongList')) {
+      if (state.modeType === 'wrong') document.getElementById('modeWrongList').checked = true;
+      else document.getElementById('modeNormal').checked = true;
+      toggleModeUI();
+    }
+    if (document.getElementById('rangeStart')) document.getElementById('rangeStart').value = state.rangeStart || 1;
+    if (document.getElementById('rangeEnd')) document.getElementById('rangeEnd').value = state.rangeEnd || (quizData.length > 0 ? quizData.length : 1);
+    if (document.getElementById('orderRandom')) {
+      if (state.orderType === 'random') document.getElementById('orderRandom').checked = true;
+      else document.getElementById('orderNormal').checked = true;
+    }
+    if (document.getElementById('maxQuestions')) document.getElementById('maxQuestions').value = state.maxQuestions || "";
+    
+    currentIndex = state.currentIndex || 0;
+    memoIndex = state.memoIndex || 0;
+    isCardFront = (state.isCardFront !== undefined) ? state.isCardFront : true;
+    currentQuestions = state.currentQuestions || [];
+    quizHistoryLogs = state.quizHistoryLogs || [];
+    lastResultFeedbackHTML = state.lastResultFeedbackHTML || "";
+  } catch(e) {
+    console.error("状態復帰エラー", e);
+  }
+}
+
+function renderTopView() {
+  const gallery = document.getElementById('listGallery');
+  if(!gallery) return;
+  gallery.innerHTML = "";
+
+  appData.forEach(list => {
+    const card = document.createElement('div');
+    card.className = "list-card";
+    
+    const infoWrapper = document.createElement('div');
+    infoWrapper.className = "list-info";
+    infoWrapper.onclick = () => openNotebook(list.listId);
+    infoWrapper.innerHTML = `
+      <span class="list-title-text">${list.listName}</span>
+      <span class="list-count-badge">${list.items.length} 問収録</span>
+    `;
+    card.appendChild(infoWrapper);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = "direct-delete-btn";
+    delBtn.innerHTML = "🗑️";
+    delBtn.title = "このリストを削除";
+    delBtn.onclick = (e) => {
+      e.stopPropagation(); 
+      triggerDeleteListModal(list.listId, list.listName);
+    };
+    card.appendChild(delBtn);
+
+    gallery.appendChild(card);
+  });
+}
+
+function triggerDeleteListModal(listId, listName) {
+  document.getElementById('deleteModalText').innerHTML = `本当に単語帳<b>「${listName}」</b>を丸ごと削除してもよろしいですか？<br>この操作は取り消せません。`;
+  openModal('deleteModal');
+  
+  document.getElementById('modalConfirmDeleteBtn').onclick = () => {
+    appData = appData.filter(l => l.listId !== listId);
+    localStorage.removeItem(`chem_wrong_ids_${listId}`);
+    saveAppData();
+    closeModal('deleteModal');
+    renderTopView();
+    saveViewState();
+  };
+}
+
+function createNewList() {
+  const input = document.getElementById('newListName');
+  const name = input.value.trim();
+  if (name === "") return;
+
+  const newListId = Date.now();
+  appData.push({ listId: newListId, listName: name, items: [] });
+  saveAppData();
+  input.value = "";
+  
+  renderTopView();
+  openNotebook(newListId); 
+}
+
+function openNotebook(listId) {
+  currentActiveListId = listId;
+  const foundList = appData.find(l => l.listId === listId);
+  if (foundList) {
+    quizData = foundList.items;
+    saveViewState();
+    navigateTo('#list');
+  }
+}
+
+function editListNameInline() {
+  const foundList = appData.find(l => l.listId === currentActiveListId);
+  if (!foundList) return;
+  
+  const newName = prompt("新しい単語帳の名前を入力してください：", foundList.listName);
+  if (newName === null) return; 
+  const trimmed = newName.trim();
+  if (trimmed === "") { alert("名前を空にすることはできません。"); return; }
+  
+  foundList.listName = trimmed;
+  document.getElementById('currentListTitle').textContent = trimmed;
+  saveAppData();
+  saveViewState();
+}
+
+// ==================== 📋 単語帳内部リスト管理 ====================
+function renderMainList() {
+  const container = document.getElementById('listContainer');
+  if (!container) return;
+  container.innerHTML = ""; 
+
+  quizData.forEach((data, index) => {
+    const item = document.createElement('div');
+    item.className = "list-item";
+    item.setAttribute('draggable', isBulkDeleteMode ? 'false' : 'true'); 
+    item.dataset.id = data.id;
+
+    // ★【仕様変更】リストの項目（外枠含む全体）をクリックした時の挙動
+    item.onclick = (e) => {
+      if (isBulkDeleteMode) {
+        // まとめて削除モードの時は、どこをクリックしてもチェックボックスを反転
+        const targetChk = item.querySelector('.bulk-checkbox');
+        if (targetChk && e.target !== targetChk) {
+          targetChk.checked = !targetChk.checked;
+        }
+      } else {
+        // 通常モードの時は、ゴミ箱ボタン以外をクリックしたら編集モーダルを開く
+        if (!e.target.closest('.direct-delete-btn')) {
+          triggerEditWordModal(data.id, data.question, data.answer);
+        }
+      }
+    };
+
+    const textBlock = document.createElement('div');
+    textBlock.className = "list-text-block";
+    textBlock.innerHTML = `
+      <div><span class="list-num">${index + 1}.</span><span class="list-q">${data.question}</span></div>
+      <span class="list-a">${data.answer}</span>
+    `;
+    item.appendChild(textBlock);
+
+    const rightActions = document.createElement('div');
+    rightActions.className = "list-actions-right";
+
+    const chk = document.createElement('input');
+    chk.type = "checkbox";
+    chk.className = "bulk-checkbox";
+    chk.value = data.id;
+
+    const delBtn = document.createElement('button');
+    delBtn.className = "direct-delete-btn";
+    delBtn.innerHTML = "🗑️";
+    delBtn.title = "この単語を削除";
+    
+    if (isBulkDeleteMode) {
+      delBtn.style.display = "none";
+      chk.style.display = "inline-block";
+    } else {
+      delBtn.style.display = "flex";
+      chk.style.display = "none";
+    }
+    
+    delBtn.onclick = (e) => { 
+      e.stopPropagation(); 
+      if (isBulkDeleteMode) return;
+      executeDirectDeleteWord(data.id); 
+    };
+
+    rightActions.appendChild(chk);
+    rightActions.appendChild(delBtn);
+    item.appendChild(rightActions);
+
+    if (!isBulkDeleteMode) {
+      item.addEventListener('dragstart', () => { item.classList.add('dragging'); });
+      item.addEventListener('dragend', () => { item.classList.remove('dragging'); reorderQuizData(); });
+    }
+    container.appendChild(item);
+  });
+
+  if (!isBulkDeleteMode) {
+    container.addEventListener('dragover', e => {
+      e.preventDefault();
+      const draggingItem = document.querySelector('.dragging');
+      if (!draggingItem) return;
+      const siblings = [...container.querySelectorAll('.list-item:not(.dragging)')];
+      let nextSibling = siblings.find(sibling => e.clientY <= sibling.getBoundingClientRect().top + sibling.getBoundingClientRect().height / 2);
+      container.insertBefore(draggingItem, nextSibling);
+      updateListNumbersDom();
+    });
+  }
+
+  if (quizData.length > 0) {
+    if(!document.getElementById('rangeEnd').value || document.getElementById('rangeEnd').value == "1") {
+      document.getElementById('rangeEnd').value = quizData.length;
+    }
+  }
+}
+
+function executeDirectDeleteWord(wordId) {
+  quizData = quizData.filter(item => item.id !== wordId);
+  let wrongIds = getSavedWrongIds();
+  wrongIds = wrongIds.filter(id => id !== wordId);
+  saveWrongIds(wrongIds);
+  syncAndSaveCurrentList();
+  
+  const currentLen = quizData.length > 0 ? quizData.length : 1;
+  document.getElementById('rangeEnd').value = currentLen;
+  if (parseInt(document.getElementById('rangeStart').value) > currentLen) {
+    document.getElementById('rangeStart').value = currentLen;
+  }
+  renderMainList();
+  saveViewState();
+}
+
+function toggleBulkDeleteMode() {
+  isBulkDeleteMode = !isBulkDeleteMode;
+  
+  const trigger = document.getElementById('bulkDeleteTriggerBtn');
+  const execute = document.getElementById('bulkExecuteBtn');
+  const cancel = document.getElementById('bulkCancelBtn');
+  
+  if (isBulkDeleteMode) {
+    trigger.style.display = "none";
+    execute.style.display = "inline-block";
+    cancel.style.display = "inline-block";
+  } else {
+    trigger.style.display = "inline-block";
+    execute.style.display = "none";
+    cancel.style.display = "none";
+  }
+  renderMainList();
+}
+
+function executeBulkDelete() {
+  const checkedBoxes = document.querySelectorAll('#listContainer .bulk-checkbox:checked');
+  if (checkedBoxes.length === 0) { alert("削除する単語が選択されていません。"); return; }
+
+  const idsToDelete = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+  quizData = quizData.filter(item => !idsToDelete.includes(item.id));
+  
+  let wrongIds = getSavedWrongIds();
+  wrongIds = wrongIds.filter(id => !idsToDelete.includes(id));
+  saveWrongIds(wrongIds);
+  syncAndSaveCurrentList();
+  
+  const currentLen = quizData.length > 0 ? quizData.length : 1;
+  document.getElementById('rangeEnd').value = currentLen;
+  if (parseInt(document.getElementById('rangeStart').value) > currentLen) {
+    document.getElementById('rangeStart').value = currentLen;
+  }
+
+  isBulkDeleteMode = false;
+  document.getElementById('bulkDeleteTriggerBtn').style.display = "inline-block";
+  document.getElementById('bulkExecuteBtn').style.display = "none";
+  document.getElementById('bulkCancelBtn').style.display = "none";
+  
+  renderMainList();
+  saveViewState();
+}
+
+function triggerEditWordModal(id, oldQ, oldA) {
+  document.getElementById('modalEditQ').value = oldQ;
+  document.getElementById('modalEditA').value = oldA;
+  openModal('editWordModal');
+
+  document.getElementById('modalConfirmEditBtn').onclick = () => {
+    const newQ = document.getElementById('modalEditQ').value.trim();
+    const newA = document.getElementById('modalEditA').value.trim();
+    if (newQ === "" || newA === "") return;
+
+    const found = quizData.find(item => item.id === id);
+    if (found) { found.question = newQ; found.answer = newA; }
+
+    syncAndSaveCurrentList();
+    closeModal('editWordModal');
+    renderMainList();
+    saveViewState();
+  };
+}
+
+function syncAndSaveCurrentList() {
+  const targetList = appData.find(l => l.listId === currentActiveListId);
+  if (targetList) targetList.items = quizData;
+  saveAppData();
+}
+
+function updateListNumbersDom() {
+  document.querySelectorAll('#listContainer .list-item').forEach((item, index) => {
+    item.querySelector('.list-num').textContent = `${index + 1}.`;
+  });
+}
+
+function reorderQuizData() {
+  const newOrderedData = [];
+  document.querySelectorAll('#listContainer .list-item').forEach(item => {
+    const id = parseInt(item.dataset.id);
+    const found = quizData.find(q => q.id === id);
+    if (found) newOrderedData.push(found);
+  });
+  quizData = newOrderedData;
+  syncAndSaveCurrentList();
+  saveViewState();
+}
+
+function addNewProblem() {
+  const qInput = document.getElementById('newQuestion');
+  const aInput = document.getElementById('newAnswer');
+  if (qInput.value.trim() === "" || aInput.value.trim() === "") return;
+
+  const nextId = quizData.length > 0 ? Math.max(...quizData.map(q => q.id)) + 1 : 1;
+  quizData.push({ id: nextId, question: qInput.value.trim(), answer: aInput.value.trim() });
+  
+  syncAndSaveCurrentList();
+  qInput.value = ""; aInput.value = "";
+  renderMainList();
+  saveViewState();
+  qInput.focus(); 
+}
+
+function validateCounter(input) {
+  let val = parseInt(input.value); 
+  const maxVal = quizData.length > 0 ? quizData.length : 1;
+  if (isNaN(val)) { input.value = 1; return; }
+  if (val < 1) { input.value = maxVal; } else if (val > maxVal) { input.value = 1; }
+}
+
+// ==================== 🃏 暗記モードロジック ====================
+function startMemorizeMode() {
+  if (!prepareQuestions()) return;
+  memoIndex = 0;
+  saveViewState();
+  navigateTo('#memorize');
+}
+
+function showMemoCard() {
+  isCardFront = true;
+  const card = document.getElementById('bigCard');
+  if(!card) return;
+  card.classList.remove('back-style');
+  document.getElementById('memoProgress').textContent = `暗記カード： ${memoIndex + 1} / ${currentQuestions.length}`;
+  card.textContent = currentQuestions[memoIndex].question;
+
+  const prevWrapper = document.getElementById('memoPrevBtnWrapper');
+  if(prevWrapper) {
+    prevWrapper.style.visibility = (memoIndex === 0) ? "hidden" : "visible";
+  }
+}
+
+function flipBigCard() {
+  const card = document.getElementById('bigCard');
+  card.textContent = isCardFront ? currentQuestions[memoIndex].answer : currentQuestions[memoIndex].question;
+  card.classList.toggle('back-style', isCardFront);
+  isCardFront = !isCardFront;
+  saveViewState();
+}
+
+function nextMemo() {
+  if (memoIndex < currentQuestions.length - 1) { memoIndex++; showMemoCard(); saveViewState(); } 
+  else { openModal('memoEndModal'); }
+}
+
+function prevMemo() { if (memoIndex > 0) { memoIndex--; showMemoCard(); saveViewState(); } }
+function restartMemorize() { closeModal('memoEndModal'); memoIndex = 0; showMemoCard(); saveViewState(); }
+function exitMemorize() { closeModal('memoEndModal'); backToMainList(); }
+
+function backToMainList() {
+  if (autoNextTimer) clearTimeout(autoNextTimer); 
+  navigateTo('#list');
+}
+
+// ==================== 📝 小テストロジック ====================
+function startQuizMode() {
+  if (!prepareQuestions()) return;
+  quizHistoryLogs = []; 
+  lastResultFeedbackHTML = ""; 
+  saveViewState();
+  navigateTo('#quiz');
+}
+
+function retryQuiz(retryMode) {
+  if (autoNextTimer) clearTimeout(autoNextTimer);
+  
+  if (retryMode === 'wrong') {
+    const wrongItems = [];
+    quizHistoryLogs.forEach(log => {
+      if (!log.isCorrect) {
+        const match = quizData.find(item => item.question === log.question);
+        if (match) wrongItems.push(match);
+      }
+    });
+    if (wrongItems.length === 0) { alert("間違えた問題はありません！🎉"); return; }
+    currentQuestions = wrongItems;
+  } else {
+    if (!prepareQuestions()) return;
+  }
+  
+  currentIndex = 0;
+  quizHistoryLogs = [];
+  lastResultFeedbackHTML = "";
+  saveViewState();
+  navigateTo('#quiz');
+  routeView('#quiz'); 
+}
+
+function getSavedWrongIds() { return JSON.parse(localStorage.getItem(`chem_wrong_ids_${currentActiveListId}`)) || []; }
+function saveWrongIds(ids) { localStorage.setItem(`chem_wrong_ids_${currentActiveListId}`, JSON.stringify(ids)); updateWrongCountLabel(); }
+function updateWrongCountLabel() { const lbl = document.getElementById('wrongCountLabel'); if(lbl) lbl.textContent = getSavedWrongIds().length; }
+function toggleModeUI() { const area = document.getElementById('normalConfigArea'); if(area) area.style.display = document.getElementById('modeNormal').checked ? 'block' : 'none'; }
+
+function prepareQuestions() {
+  if (quizData.length === 0) { alert("問題が登録されていません。"); return false; }
+  
+  let startVal = parseInt(document.getElementById('rangeStart').value) || 1;
+  let endVal = parseInt(document.getElementById('rangeEnd').value) || quizData.length;
+  if (startVal > endVal) { alert("出題範囲の開始が終了を上回っています。"); return false; }
+
+  let filtered = document.getElementById('modeNormal').checked ? quizData.slice(startVal - 1, endVal) : quizData.filter(q => getSavedWrongIds().includes(q.id));
+  if (filtered.length === 0) { alert("出題条件に該当する問題がありません。"); return false; }
+
+  if (document.getElementById('orderRandom').checked) {
+    for (let i = filtered.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [filtered[i], filtered[j]] = [filtered[j], filtered[i]]; }
+  }
+  let maxQ = parseInt(document.getElementById('maxQuestions').value);
+  if (!isNaN(maxQ) && maxQ > 0) filtered = filtered.slice(0, maxQ);
+
+  currentQuestions = filtered; currentIndex = 0; wrongQuestions = [];
+  return true;
+}
+
+function showQuestion() {
+  if (autoNextTimer) clearTimeout(autoNextTimer); 
+  inputField.value = ""; inputField.disabled = false;
+  
+  const submitBtn = document.getElementById('submitBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  if (submitBtn) submitBtn.disabled = false;
+  if (resetBtn) resetBtn.disabled = false;
+
+  progressText.textContent = `第 ${currentIndex + 1} 問 / 全 ${currentQuestions.length} 問`;
+  document.getElementById('quizBigCardQuestion').textContent = currentQuestions[currentIndex].question;
+  
+  if (lastResultFeedbackHTML) {
+    previousAnswerArea.innerHTML = lastResultFeedbackHTML;
+  } else {
+    previousAnswerArea.innerHTML = "";
+  }
+  
+  inputField.focus();
+}
+
+function resetQuizInput() {
+  inputField.value = "";
+  inputField.focus();
+}
+
+function checkAnswer() {
+  if (inputField.disabled) return;
+
+  let userText = inputField.value; let currentQ = currentQuestions[currentIndex]; let correctAnswer = currentQ.answer;
+  function simplify(t) { return t.replaceAll('+','').replaceAll('⁺','').replaceAll('→','').replaceAll('->','').replaceAll(' ',''); }
+  let wrongIds = getSavedWrongIds();
+  let isCorrect = simplify(userText) === simplify(correctAnswer);
+
+  quizHistoryLogs.push({ question: currentQ.question, correctAnswer: correctAnswer, userAns: userText, isCorrect: isCorrect });
+
+  inputField.disabled = true; 
+  const submitBtn = document.getElementById('submitBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  if (submitBtn) submitBtn.disabled = true;
+  if (resetBtn) resetBtn.disabled = true;
+
+  if (isCorrect) {
+    lastResultFeedbackHTML = `前問の判定: <span class="prev-correct">⭕ 正解</span>（${currentQ.question} ➔ ${correctAnswer}）`;
+    wrongIds = wrongIds.filter(id => id !== currentQ.id);
+  } else {
+    lastResultFeedbackHTML = `前問の判定: <span class="prev-wrong">❌ 不正解</span>（${currentQ.question} ➔ 正解: <span style="color:#2196f3;">${correctAnswer}</span>）`;
+    wrongQuestions.push(currentQ);
+    if (!wrongIds.includes(currentQ.id)) wrongIds.push(currentQ.id);
+  }
+  
+  saveWrongIds(wrongIds);
+  saveViewState();
+  
+  autoNextTimer = setTimeout(() => {
+    nextQuestion();
+  }, 100);
+}
+
+function nextQuestion() {
+  currentIndex++;
+  if (currentIndex < currentQuestions.length) { 
+    saveViewState();
+    showQuestion(); 
+  } else { 
+    saveViewState();
+    navigateTo('#result'); 
+  }
+}
+
+function showQuizReviewSummary() {
+  const wrongCount = quizHistoryLogs.filter(l => !l.isCorrect).length;
+  const retryWrongBtn = document.getElementById('retryWrongBtn');
+  if (retryWrongBtn) {
+    retryWrongBtn.style.display = wrongCount > 0 ? "inline-block" : "none";
+  }
+  document.getElementById('quizFinalScore').textContent = `🏁 テスト終了！ 正解数: ${quizHistoryLogs.filter(l => l.isCorrect).length} / ${quizHistoryLogs.length}`;
+  switchReviewTab('all'); 
+}
+
+function switchReviewTab(tabType) {
+  const tabAll = document.getElementById('tabAllBtn');
+  const tabWrong = document.getElementById('tabWrongBtn');
+  if (tabType === 'all') {
+    tabAll.className = "btn btn-action"; tabWrong.className = "btn btn-sub";
+    renderReviewRows(quizHistoryLogs);
+  } else {
+    tabAll.className = "btn btn-sub"; tabWrong.className = "btn btn-action";
+    renderReviewRows(quizHistoryLogs.filter(log => !log.isCorrect));
+  }
+}
+
+function renderReviewRows(logsArray) {
+  const tbody = document.getElementById('reviewTableBody');
+  if(!tbody) return;
+  tbody.innerHTML = "";
+  if (logsArray.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:gray; padding:20px;">該当する問題はありません。</td></tr>`;
+    return;
+  }
+  logsArray.forEach(log => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="${log.isCorrect ? 'status-ok' : 'status-ng'}">${log.isCorrect ? '⭕ 正解' : '❌ 不正解'}</td>
+      <td><b>${log.question}</b></td>
+      <td style="color:#2196f3; font-weight:bold;">${log.correctAnswer}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function initInputFieldAutoConversion(targetInput) {
+  if (!targetInput) return;
+  
+  let isShiftPressed = false;
+  targetInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Shift') isShiftPressed = true;
+  });
+  targetInput.addEventListener('keyup', function(e) {
+    if (e.key === 'Shift') isShiftPressed = false;
+  });
+
+  targetInput.addEventListener('input', function() {
+    let start = targetInput.selectionStart; 
+    let val = targetInput.value;
+    
+    val = val.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    val = val.replaceAll('；', ';').replaceAll('ー', '-').replaceAll('．', '.').replaceAll('”', '"').replaceAll(' ', ' ');
+    val = val.replaceAll('＋', '+');
+
+    const shiftNumbers = { '!': '1', '"': '2', '#': '3', '$': '4', '%': '5', '&': '6', "'": '7', '(': '8', ')': '9' };
+    for (let key in shiftNumbers) { val = val.replaceAll(key, shiftNumbers[key]); }
+    
+    if (isShiftPressed) {
+      val = val.replaceAll(';', '⁺').replaceAll('-', '⁻').replaceAll('.', '･').replaceAll(' ', '→');
+    } else {
+      val = val.replaceAll(';', '⁺').replaceAll('+', '⁺').replaceAll('-', '⁻').replaceAll('.', '･').replaceAll(' ', '→');
+    }
+    val = val.toUpperCase();
+    
+    val = val.replaceAll('E-', 'e-');
+    val = val.replaceAll('E⁺', 'e⁺');
+    val = val.replaceAll('E⁻', 'e⁻');
+
+    const elements2char = ['He','Li','Be','Ne','Na','Mg','Al','Si','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn','Sb','Te','I','Xe','Cs','Ba','Pt','Au','Hg','Pb','Bi','Po','At','Rn','Fr','Ra','U'];
+    elements2char.forEach(el => { val = val.replaceAll(el.toUpperCase(), el); });
+    
+    let newVal = "";
+    for (let i = 0; i < val.length; i++) {
+      let char = val[i];
+      if (char >= '0' && char <= '9') {
+        let shouldSub = false; 
+        if (i > 0) { 
+          let prev = val[i-1]; 
+          if (/[A-Za-z)\]₀₁₂₃₄₅₆₇₈₉⁺⁻]/.test(prev)) shouldSub = true; 
+          if (/[ +\-→]/.test(prev)) shouldSub = false; 
+        }
+        if (i === 0) shouldSub = false;
+        if (shouldSub) { 
+          const subs = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'}; 
+          char = subs[char]; 
+        }
+      }
+      newVal += char;
+    }
+    newVal = newVal.replaceAll('E⁻', 'e⁻').replaceAll('E⁺', 'e⁺');
+    
+    if (targetInput.value !== newVal) { 
+      targetInput.value = newVal; 
+      targetInput.selectionStart = targetInput.selectionEnd = start; 
+    }
+  });
+}
+
+inputField.addEventListener('keydown', function(event) {
+  if (event.key === 'Enter') { 
+    if (event.isComposing) return; 
+    event.preventDefault(); 
+    checkAnswer(); 
+  }
+});

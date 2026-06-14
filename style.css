@@ -1,0 +1,232 @@
+/* === 🎨 レイアウト＆共通スタイル === */
+html { overflow-y: scroll; }
+body {
+  font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  color: #333;
+  background-color: #f8f9fa;
+}
+
+.app-title { text-align: center; color: #2c3e50; margin-bottom: 25px; cursor: pointer; display: inline-block; width: 100%; }
+.app-title:hover { opacity: 0.8; }
+h2 { color: #2c3e50; margin-top: 0; }
+
+/* === 🏠 トップ画面 === */
+.top-container { max-width: 700px; margin: 0 auto; }
+.list-gallery { display: flex; flex-direction: column; gap: 12px; margin-bottom: 30px; }
+
+.list-card {
+  background-color: white;
+  border: 2px solid #e0e0e0;
+  border-left: 8px solid #009688;
+  border-radius: 8px;
+  padding: 15px 20px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 3px 6px rgba(0,0,0,0.03);
+  position: relative;
+}
+.list-info { flex: 1; display: flex; justify-content: space-between; align-items: center; margin-right: 20px; }
+.list-title-text { font-size: 1.2rem; font-weight: bold; color: #2c3e50; }
+.list-count-badge { background-color: #e0f2f1; color: #004d40; padding: 4px 10px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; }
+
+.direct-delete-btn {
+  background: none; border: none; font-size: 1.3rem; cursor: pointer; padding: 8px; border-radius: 50%; transition: background 0.2s, transform 0.1s; display: flex; align-items: center; justify-content: center;
+}
+.direct-delete-btn:hover { background-color: #ffebee; transform: scale(1.1); }
+
+/* === 2カラムメインレイアウト === */
+.main-layout { display: flex; gap: 25px; align-items: flex-start; }
+.left-column { flex: 1; min-width: 320px; }
+.right-column { flex: 1.5; min-width: 450px; }
+
+.title-area { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
+.btn-title-edit { font-size: 0.9rem; padding: 5px 12px; background-color: #cfd8dc; color: #37474f; border-radius: 4px; cursor: pointer; font-weight: bold; border: none; }
+.btn-title-edit:hover { background-color: #b0bec5; }
+
+/* ボタン共通 */
+.btn { font-size: 1.1rem; padding: 10px 20px; cursor: pointer; border: none; border-radius: 6px; font-weight: bold; transition: background 0.2s, transform 0.1s; }
+.btn:active { transform: scale(0.98); }
+.btn-sub { background-color: #e0e0e0; color: #333; }
+.btn-sub:hover { background-color: #d5d5d5; }
+.btn-action { background-color: #2196f3; color: white; }
+.btn-add { background-color: #9c27b0; color: white; width: 100%; }
+.btn-create-list { background-color: #009688; color: white; width: 100%; font-size: 1.1rem; }
+.btn-mode { background-color: #009688; color: white; font-size: 1.1rem; padding: 12px; width: 48%; }
+.btn-danger { background-color: #ef5350; color: white; }
+.btn-retry { background-color: #ff9800; color: white; }
+
+.btn-bulk { font-size: 0.85rem; padding: 6px 12px; background-color: #e53935; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; border: none; }
+.btn-bulk:hover { background-color: #c62828; }
+.btn-bulk-cancel { font-size: 0.85rem; padding: 6px 12px; background-color: #cfd8dc; color: #37474f; border-radius: 4px; cursor: pointer; font-weight: bold; border: none; }
+.btn-bulk-cancel:hover { background-color: #b0bec5; }
+
+/* 設定ボックス */
+.config-box { background-color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.config-header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px; }
+.config-title { margin: 0; font-weight: bold; font-size: 1.1rem; }
+.config-form { font-size: 0.95em; line-height: 1.8; }
+.mode-section { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #eee; }
+.counter-input { font-size: 1.1rem; width: 55px; text-align: center; padding: 4px; border: 2px solid #ccc; border-radius: 4px; }
+
+/* --- 📋 単語帳内の一覧リスト --- */
+.list-container { margin-bottom: 10px; }
+.list-item { 
+  background-color: white; 
+  border: 1px solid #e0e0e0; 
+  border-left: 5px solid #2196f3; 
+  border-radius: 6px; 
+  padding: 12px 15px; /* 💡 元のパディング幅に統一 */
+  margin-bottom: 8px; 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-between; 
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02); 
+  cursor: grab; 
+  user-select: none; 
+  position: relative;
+  min-height: auto; /* 💡 縦幅を元の自然なサイズに固定 */
+}
+.list-item:active { cursor: grabbing; }
+.list-item.dragging { opacity: 0.4; background-color: #e3f2fd; }
+.list-num { font-weight: bold; color: #777; width: 35px; }
+.list-text-block { flex: 1; display: flex; align-items: center; justify-content: space-between; padding-right: 15px; cursor: pointer; }
+.list-q { font-weight: bold; font-size: 1.05rem; }
+.list-a { font-size: 1.2rem; color: #2196f3; font-weight: bold; text-align: right; word-break: break-all; }
+
+.list-actions-right { 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  width: 40px; 
+  height: 35px; /* 💡 切り替え時の横・縦ブレを防ぐ固定幅 */
+}
+.bulk-checkbox { 
+  width: 22px; 
+  height: 22px; 
+  cursor: pointer; 
+  display: none; 
+  margin: 0; 
+}
+
+/* === 🪟 カスタムポップアップ === */
+.modal-overlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; 
+  align-items: flex-start; padding-top: 20vh;
+}
+.modal-box {
+  background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); max-width: 450px; width: 90%; text-align: center; animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal-box h3 { margin-top: 0; color: #2c3e50; }
+.modal-flex-inputs { display: flex; flex-direction: column; gap: 10px; margin: 15px 0; text-align: left; }
+.modal-buttons { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
+
+/* --- 🃏 暗記カード用 ＆ 📝 小テスト画面共通（特大白背景エリアのサイズ統一） --- */
+.memorize-container,
+.quiz-container { 
+  max-width: 1500px;
+  margin: 0 auto; 
+  background-color: white; 
+  padding: 35px 30px; 
+  border-radius: 12px; 
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
+  text-align: center; 
+  position: relative;
+  min-height: 540px; /* 💡 モードを切り替えても白いエリア全体が伸縮しないよう固定 */
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* ─── 暗記モード：中央のカード（青枠を維持） ─── */
+.big-card { 
+  background-color: #fff; 
+  border: 3px solid #3498db; /* 💡 暗記モードのみ、しっかり青枠を表示 */
+  border-radius: 15px; 
+  min-height: 220px; 
+  display: flex; 
+  justify-content: center; 
+  align-items: center; 
+  font-size: 1.8rem; 
+  font-weight: bold; 
+  margin: 20px auto; 
+  max-width: 580px; 
+  width: 100%;
+  padding: 25px; 
+  box-shadow: 0 6px 15px rgba(0,0,0,0.05); 
+  box-sizing: border-box; 
+}
+.big-card.clickable { cursor: pointer; }
+.big-card.back-style { background-color: #e8f4fd; color: #2980b9; border-color: #2980b9; font-size: 2.3rem; }
+
+/* ─── 小テストモード：中央のカード（青枠を取り除く） ─── */
+.quiz-inner-card {
+  background-color: #fff; 
+  border: 2px solid #fff; /* 💡 小テストの時は青枠を消して、目立たないグレー枠に変更 */
+  border-radius: 30px;
+  margin: 20px auto; 
+  max-width: 1000px; 
+  width: 100%; 
+  padding: 30px 25px;
+  box-shadow: 0 6px 15px rgba(0,0,0,0.05); 
+  box-sizing: border-box;
+  display: flex; 
+  flex-direction: column; 
+  align-items: center; 
+  justify-content: center; 
+  gap: 20px;
+}
+.quiz-q-text { font-size: 1.8rem; font-weight: bold; color: #2c3e50; word-break: break-all; margin: 10px 0; }
+
+.quiz-vertical-wrapper { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+#chemInput { 
+  font-size: 1.5rem;       /* 文字の大きさ */
+  width: 100%;             /* 横幅いっぱいに広げる */
+  padding: 12px;           /* 入力欄の中の余白 */
+  border: 2px solid #ccc;  /* 💡 入力欄の枠線（グレー） */
+  border-radius: 6px;      /* 角の丸み */
+  box-sizing: border-box; 
+  text-align: center;      /* 入力する文字を中央寄せ */
+}
+#chemInput:focus { 
+  border-color: #2196f3;   /* 💡 入力欄をクリックした時に枠線を青くする */
+  outline: none; 
+}
+
+.quiz-buttons-row { display: flex; gap: 12px; width: 100%; }
+#resetBtn { background-color: #cfd8dc; color: #37474f; font-size: 1.1rem; padding: 12px; border-radius: 6px; font-weight: bold; width: 30%; border: none; cursor: pointer; white-space: nowrap; }
+#resetBtn:hover { background-color: #b0bec5; }
+#submitBtn { font-size: 1.1rem; padding: 12px; background-color: #2196f3; color: white; border-radius: 6px; font-weight: bold; width: 70%; border: none; cursor: pointer; white-space: nowrap; }
+#submitBtn:hover { background-color: #1976d2; }
+#resetBtn:disabled, #submitBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.input-style { font-size: 1.1rem; padding: 8px; border: 2px solid #ccc; border-radius: 6px; width: 100%; box-sizing: border-box; margin-bottom: 10px; }
+
+.previous-answer-box { 
+    margin-top: 35px; 
+    padding-top: 15px; 
+    border-top: 1px dashed #ddd; 
+    font-size: 1.25rem;   /* 正誤判定の文字の大きさ */
+    color: #666; 
+    font-weight: bold; 
+    min-height: 24px;
+}
+.prev-correct { color: green; font-weight: bold; }
+.prev-wrong { color: red; font-weight: bold; }
+
+.review-table { width: 100%; border-collapse: collapse; margin-top: 15px; text-align: left; }
+.review-table th, .review-table td { padding: 10px; border-bottom: 1px solid #ddd; }
+.review-table th { background-color: #f1f1f1; }
+.status-ok { color: green; font-weight: bold; }
+.status-ng { color: red; font-weight: bold; }
+
+@media (max-width: 800px) {
+  .main-layout { flex-direction: column; }
+  .left-column, .right-column { min-width: 100%; }
+}
