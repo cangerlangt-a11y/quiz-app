@@ -3,14 +3,16 @@
 // ==========================================
 const SUPABASE_URL = 'https://otwqwuidhkbtfniwpzvf.supabase.co/rest/v1/'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90d3F3dWlkaGtidGZuaXdwenZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTA0MjYsImV4cCI6MjA5Njk2NjQyNn0.dtPkiYdqo011OpytX6nCvMqiOzrdpEVZ8oj6NXPIsOE'; 
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// 💡 【修正点】名前が被らないように "supabaseClient" に変更しました
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ==========================================
 // 📦 アプリ用変数（LocalStorageの読み込みは廃止し、サーバーと連動します）
 // ==========================================
-let appData = []; // すべての部屋リストを保持
-let currentActiveListId = null; // 現在選んでいる部屋のID (roomsのid)
-let quizData = []; // 現在選んでいる部屋の単語データ一覧
+let appData = []; 
+let currentActiveListId = null; 
+let quizData = []; 
 let currentQuestions = []; 
 let wrongQuestions = []; 
 let currentIndex = 0; 
@@ -73,15 +75,12 @@ function navigateTo(hash) {
 
 // 🌐 【新機能】Supabaseから全ての部屋と単語を一括取得して appData の形に整える
 async function loadAllAppDataFromSupabase() {
-  // rooms（部屋）をすべて取得（作成日時が古い順）
-  const { data: rooms, error: roomError } = await supabase.from('rooms').select('*').order('created_at', { ascending: true });
+  const { data: rooms, error: roomError } = await supabaseClient.from('rooms').select('*').order('created_at', { ascending: true });
   if (roomError) { console.error("部屋の取得失敗:", roomError); return; }
 
-  // words（単語）をすべて取得
-  const { data: words, error: wordError } = await supabase.from('words').select('*').order('id', { ascending: true });
+  const { data: words, error: wordError } = await supabaseClient.from('words').select('*').order('id', { ascending: true });
   if (wordError) { console.error("単語の取得失敗:", wordError); return; }
 
-  // 取得したデータを、元の appData の構造 [{ listId, listName, items: [...] }] に変換して合体
   appData = rooms.map(room => {
     const matchedItems = words ? words.filter(w => w.room_id === room.id) : [];
     return {
@@ -143,7 +142,6 @@ function routeView(hash) {
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
-// 💡 画面の状態保存（リロード対策）はローカルストレージを補助的に使います
 function saveViewState() {
   const state = {
     listId: currentActiveListId,
@@ -227,40 +225,34 @@ function renderTopView() {
   });
 }
 
-// 🌐 単語帳の「部屋」を削除する処理をSupabaseと連動
 function triggerDeleteListModal(listId, listName) {
   document.getElementById('deleteModalText').innerHTML = `本当に単語帳<b>「${listName}」</b>を丸ごと削除してもよろしいですか？<br>この操作は取り消せません。`;
   openModal('deleteModal');
   
   document.getElementById('modalConfirmDeleteBtn').onclick = async () => {
-    // 1. 先にその部屋に紐づくすべての単語をwordsテーブルから一括削除
-    await supabase.from('words').delete().eq('room_id', listId);
-    // 2. roomsテーブルから部屋自体を削除
-    await supabase.from('rooms').delete().eq('id', listId);
-
+    await supabaseClient.from('words').delete().eq('room_id', listId);
+    await supabaseClient.from('rooms').delete().eq('id', listId);
     localStorage.removeItem(`chem_wrong_ids_${listId}`);
     
     closeModal('deleteModal');
-    await loadAllAppDataFromSupabase(); // 最新状態に更新
+    await loadAllAppDataFromSupabase(); 
     renderTopView();
     saveViewState();
   };
 }
 
-// 🌐 単語帳の「新しい部屋」を作成してSupabaseに保存する処理
 async function createNewList() {
   const input = document.getElementById('newListName');
   const name = input.value.trim();
   if (name === "") return;
 
-  // Supabaseのroomsテーブルに新しい部屋を追加
-  const { data, error } = await supabase.from('rooms').insert([{ title: name }]).select();
+  const { data, error } = await supabaseClient.from('rooms').insert([{ title: name }]).select();
   if (error) { alert("部屋の作成に失敗しました:" + error.message); return; }
 
   const newRoomId = data[0].id;
   input.value = "";
   
-  await loadAllAppDataFromSupabase(); // 最新状態に更新
+  await loadAllAppDataFromSupabase(); 
   renderTopView();
   openNotebook(newRoomId); 
 }
@@ -275,7 +267,6 @@ function openNotebook(listId) {
   }
 }
 
-// 🌐 部屋の名前（単語帳タイトル）を変更する処理をSupabaseと連動
 async function editListNameInline() {
   const foundList = appData.find(l => l.listId === currentActiveListId);
   if (!foundList) return;
@@ -285,8 +276,7 @@ async function editListNameInline() {
   const trimmed = newName.trim();
   if (trimmed === "") { alert("名前を空にすることはできません。"); return; }
   
-  // Supabaseのroomsのタイトルを書き換える
-  const { error } = await supabase.from('rooms').update({ title: trimmed }).eq('id', currentActiveListId);
+  const { error } = await supabaseClient.from('rooms').update({ title: trimmed }).eq('id', currentActiveListId);
   if (error) { alert("名前の変更に失敗しました"); return; }
 
   foundList.listName = trimmed;
@@ -295,7 +285,6 @@ async function editListNameInline() {
   saveViewState();
 }
 
-// ==================== 📋 単語帳内部リスト管理 ====================
 function renderMainList() {
   const container = document.getElementById('listContainer');
   if (!container) return;
@@ -304,7 +293,7 @@ function renderMainList() {
   quizData.forEach((data, index) => {
     const item = document.createElement('div');
     item.className = "list-item";
-    item.setAttribute('draggable', 'false'); // 並び替え機能は競合を防ぐため手動同期時はオフに
+    item.setAttribute('draggable', 'false'); 
     item.dataset.id = data.id;
 
     item.onclick = (e) => {
@@ -369,9 +358,8 @@ function renderMainList() {
   }
 }
 
-// 🌐 単語を1件直接削除する処理をSupabaseと連動
 async function executeDirectDeleteWord(wordId) {
-  const { error } = await supabase.from('words').delete().eq('id', wordId);
+  const { error } = await supabaseClient.from('words').delete().eq('id', wordId);
   if (error) { alert("削除に失敗しました"); return; }
 
   let wrongIds = getSavedWrongIds();
@@ -409,15 +397,13 @@ function toggleBulkDeleteMode() {
   renderMainList();
 }
 
-// 🌐 まとめて単語を削除する処理をSupabaseと連動
 async function executeBulkDelete() {
   const checkedBoxes = document.querySelectorAll('#listContainer .bulk-checkbox:checked');
   if (checkedBoxes.length === 0) { alert("削除する単語が選択されていません。"); return; }
 
   const idsToDelete = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
   
-  // Supabaseから一括削除
-  const { error } = await supabase.from('words').delete().in('id', idsToDelete);
+  const { error } = await supabaseClient.from('words').delete().in('id', idsToDelete);
   if (error) { alert("まとめて削除に失敗しました"); return; }
 
   let wrongIds = getSavedWrongIds();
@@ -443,7 +429,6 @@ async function executeBulkDelete() {
   saveViewState();
 }
 
-// 🌐 単語の内容を編集・修正する処理をSupabaseと連動
 function triggerEditWordModal(id, oldQ, oldA) {
   document.getElementById('modalEditQ').value = oldQ;
   document.getElementById('modalEditA').value = oldA;
@@ -454,8 +439,7 @@ function triggerEditWordModal(id, oldQ, oldA) {
     const newA = document.getElementById('modalEditA').value.trim();
     if (newQ === "" || newA === "") return;
 
-    // Supabaseの該当単語を更新
-    const { error } = await supabase.from('words').update({ question: newQ, answer: newA }).eq('id', id);
+    const { error } = await supabaseClient.from('words').update({ question: newQ, answer: newA }).eq('id', id);
     if (error) { alert("単語の更新に失敗しました"); return; }
 
     closeModal('editWordModal');
@@ -468,14 +452,12 @@ function triggerEditWordModal(id, oldQ, oldA) {
   };
 }
 
-// 🌐 新しい単語を追加してSupabaseに保存する処理
 async function addNewProblem() {
   const qInput = document.getElementById('newQuestion');
   const aInput = document.getElementById('newAnswer');
   if (qInput.value.trim() === "" || aInput.value.trim() === "") return;
 
-  // wordsテーブルに「現在の部屋ID」を紐付けて新しくインサート
-  const { error } = await supabase.from('words').insert([
+  const { error } = await supabaseClient.from('words').insert([
     { 
       room_id: currentActiveListId, 
       question: qInput.value.trim(), 
@@ -487,7 +469,7 @@ async function addNewProblem() {
 
   qInput.value = ""; aInput.value = "";
   
-  await loadAllAppDataFromSupabase(); // 最新を再取得
+  await loadAllAppDataFromSupabase(); 
   const foundList = appData.find(l => l.listId === currentActiveListId);
   if (foundList) quizData = foundList.items;
 
@@ -503,7 +485,6 @@ function validateCounter(input) {
   if (val < 1) { input.value = maxVal; } else if (val > maxVal) { input.value = 1; }
 }
 
-// ==================== 🃏 暗記モードロジック ====================
 function startMemorizeMode() {
   if (!prepareQuestions()) return;
   memoIndex = 0;
@@ -547,7 +528,6 @@ function backToMainList() {
   navigateTo('#list');
 }
 
-// ==================== 📝 小テストロジック ====================
 function startQuizMode() {
   if (!prepareQuestions()) return;
   quizHistoryLogs = []; 
