@@ -1,10 +1,10 @@
 // ==========================================
-// ⚡ Supabase 接続設定（ここをご自身のものに書き換えてください）
+// ⚡ Supabase 接続設定（ここをご自身のものに書き換してください）
 // ==========================================
 const SUPABASE_URL = 'https://otwqwuidhkbtfniwpzvf.supabase.co'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90d3F3dWlkaGtidGZuaXdwenZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTA0MjYsImV4cCI6MjA5Njk2NjQyNn0.dtPkiYdqo011OpytX6nCvMqiOzrdpEVZ8oj6NXPIsOE'; 
 
-// 💡 【修正点】名前が被らないように "supabaseClient" に変更しました
+// 💡 名前が被らないように "supabaseClient" に変更しました
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ==========================================
@@ -28,13 +28,12 @@ const progressText = document.getElementById('progress');
 const previousAnswerArea = document.getElementById('previousAnswerArea');
 
 // 画面読み込み時の初期化
-// 画面読み込み時の初期化
 window.addEventListener('DOMContentLoaded', async () => {
   initInputFieldAutoConversion(document.getElementById('chemInput'));  
   initInputFieldAutoConversion(document.getElementById('newAnswer'));  
   initInputFieldAutoConversion(document.getElementById('modalEditA')); 
   
-  // ✨【新機能】単語帳の名前入力欄でEnterキーが押されたら、自動で作成する
+  // ✨ 単語帳の名前入力欄でEnterキーが押されたら、自動で作成する
   const newListNameInput = document.getElementById('newListName');
   if (newListNameInput) {
     newListNameInput.addEventListener('keydown', function(event) {
@@ -86,7 +85,7 @@ function navigateTo(hash) {
   window.location.hash = hash;
 }
 
-// 🌐 【新機能】Supabaseから全ての部屋と単語を一括取得して appData の形に整える
+// 🌐 Supabaseから全ての部屋と単語を一括取得して appData の形に整える
 async function loadAllAppDataFromSupabase() {
   const { data: rooms, error: roomError } = await supabaseClient.from('rooms').select('*').order('created_at', { ascending: true });
   if (roomError) { console.error("部屋の取得失敗:", roomError); return; }
@@ -99,6 +98,7 @@ async function loadAllAppDataFromSupabase() {
     return {
       listId: room.id,
       listName: room.title,
+      listTags: room.tags || "",
       items: matchedItems.map(w => ({ id: w.id, question: w.question, answer: w.answer }))
     };
   });
@@ -122,8 +122,19 @@ function routeView(hash) {
     const foundList = appData.find(l => l.listId === currentActiveListId);
     if (foundList) {
       document.getElementById('currentListTitle').textContent = foundList.listName;
+      // タグがある時だけ余白（marginBottom）を付け、ない時は詰める
+      const tArray = foundList.listTags ? foundList.listTags.split(',').map(t=>t.trim()).filter(t=>t) : [];
+      const tagsContainer = document.getElementById('currentListTags');
+      if (tArray.length > 0) {
+        tagsContainer.style.marginBottom = '15px';
+        tagsContainer.innerHTML = tArray.map(t => `<span class="list-tag-badge">#${t}</span>`).join(' ');
+      } else {
+        tagsContainer.style.marginBottom = '0px';
+        tagsContainer.innerHTML = '';
+      }
+      
       renderMainList();
-      updateWrongCountLabel();
+      updateChemPlaceholder(); // 💡 画面切り替え時にプレースホルダーを判定
     }
   } 
   else if (hash.startsWith('#memorize')) {
@@ -214,12 +225,21 @@ function renderTopView() {
   appData.forEach(list => {
     const card = document.createElement('div');
     card.className = "list-card";
+    card.onclick = () => openNotebook(list.listId);
     
     const infoWrapper = document.createElement('div');
     infoWrapper.className = "list-info";
-    infoWrapper.onclick = () => openNotebook(list.listId);
+    let tagsHTML = "";
+    if (list.listTags) {
+      const tagsArray = list.listTags.split(',').map(t => t.trim()).filter(t => t);
+      tagsHTML = tagsArray.map(t => `<span class="list-tag-badge">#${t}</span>`).join(' ');
+    }
+
     infoWrapper.innerHTML = `
-      <span class="list-title-text">${list.listName}</span>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <span class="list-title-text">${list.listName}</span>
+        <div>${tagsHTML}</div>
+      </div>
       <span class="list-count-badge">${list.items.length} 問収録</span>
     `;
     card.appendChild(infoWrapper);
@@ -445,6 +465,8 @@ async function executeBulkDelete() {
 function triggerEditWordModal(id, oldQ, oldA) {
   document.getElementById('modalEditQ').value = oldQ;
   document.getElementById('modalEditA').value = oldA;
+  
+  updateChemPlaceholder(); // 💡 編集画面を開くときにもプレースホルダーを更新
   openModal('editWordModal');
 
   document.getElementById('modalConfirmEditBtn').onclick = async () => {
@@ -710,6 +732,17 @@ function renderReviewRows(logsArray) {
   });
 }
 
+// 現在開いている単語帳に「化学」タグがついているか判定する関数
+function hasChemTag() {
+  if (!currentActiveListId) return false;
+  const currentList = appData.find(l => l.listId === currentActiveListId);
+  if (!currentList || !currentList.listTags) return false;
+  
+  // カンマ区切りのタグをバラバラにして、「化学」が含まれているか調べる
+  const tagsArray = currentList.listTags.split(',').map(t => t.trim());
+  return tagsArray.includes('化学');
+}
+
 function initInputFieldAutoConversion(targetInput) {
   if (!targetInput) return;
   
@@ -722,11 +755,14 @@ function initInputFieldAutoConversion(targetInput) {
   });
 
   targetInput.addEventListener('input', function() {
+    // ✨ 化学タグが無い場合は、自動変換の処理をスキップ（そのまま入力）する
+    if (!hasChemTag()) return;
+
     let start = targetInput.selectionStart; 
     let val = targetInput.value;
     
     val = val.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    val = val.replaceAll('；', ';').replaceAll('ー', '-').replaceAll('．', '.').replaceAll('”', '"').replaceAll(' ', ' ');
+    val = val.replaceAll('；', ';').replaceAll('ー', '-').replaceAll('．', '.').replaceAll(' ”', '"').replaceAll(' ', ' ');
     val = val.replaceAll('＋', '+');
 
     const shiftNumbers = { '!': '1', '"': '2', '#': '3', '$': '4', '%': '5', '&': '6', "'": '7', '(': '8', ')': '9' };
@@ -780,3 +816,217 @@ inputField.addEventListener('keydown', function(event) {
     checkAnswer(); 
   }
 });
+
+// タグの編集・保存
+async function editListTagsInline() {
+  const foundList = appData.find(l => l.listId === currentActiveListId);
+  if (!foundList) return;
+  
+  const newTags = prompt("タグをカンマ( , )区切りで入力してください\n（例: 化学, 定期テスト, 1学期）", foundList.listTags);
+  if (newTags === null) return; 
+  
+  const { error } = await supabaseClient.from('rooms').update({ tags: newTags }).eq('id', currentActiveListId);
+  if (error) { alert("タグの保存に失敗しました"); return; }
+
+  foundList.listTags = newTags;
+  await loadAllAppDataFromSupabase();
+  saveViewState();
+  routeView('#list'); 
+}
+
+// 💡 名前とタグをまとめて編集・保存するポップアップ処理
+function openEditListInfoModal() {
+  const foundList = appData.find(l => l.listId === currentActiveListId);
+  if (!foundList) return;
+
+  // 1. 現在の名前とタグをポップアップの入力欄にセットする
+  document.getElementById('modalEditListName').value = foundList.listName;
+  document.getElementById('modalEditListTags').value = foundList.listTags || "";
+
+  // 2. ポップアップを表示する
+  openModal('editListInfoModal');
+
+  // 3. 「保存する」ボタンが押されたときの処理
+  document.getElementById('modalConfirmListInfoBtn').onclick = async () => {
+    const newName = document.getElementById('modalEditListName').value.trim();
+    const newTags = document.getElementById('modalEditListTags').value.trim();
+
+    if (newName === "") {
+      alert("単語帳の名前は空にできません。");
+      return;
+    }
+
+    // Supabaseのデータを更新
+    const { error } = await supabaseClient
+      .from('rooms')
+      .update({ title: newName, tags: newTags })
+      .eq('id', currentActiveListId);
+
+    if (error) { 
+      alert("情報の保存に失敗しました: " + error.message); 
+      return; 
+    }
+
+    // アプリ内のデータも更新
+    foundList.listName = newName;
+    foundList.listTags = newTags;
+    document.getElementById('currentListTitle').textContent = newName;
+
+    // 最新のデータを読み直して画面に反映
+    await loadAllAppDataFromSupabase();
+    updateChemPlaceholder(); // 💡 保存時にプレースホルダーを即時判定
+    saveViewState();
+    routeView('#list'); 
+    closeModal('editListInfoModal');
+  };
+}
+
+// 💡 「化学」タグの有無で入力欄のプレースホルダーとヘルプボタンを切り替える関数
+function updateChemPlaceholder() {
+  if (!currentActiveListId) return;
+  const foundList = appData.find(l => l.listId === currentActiveListId);
+  if (!foundList) return;
+
+  // タグの中に「化学」という文字が含まれているかチェック
+  const hasChem = foundList.listTags && foundList.listTags.split(',').map(t => t.trim()).includes('化学');
+  
+  // 化学タグがあれば案内を出し、なければただの「答え」にする
+  const placeholderText = hasChem ? "答え（自動変換が適用されます）" : "答え";
+  
+  // 各入力欄を取得して書き換え
+  const newAnswerInput = document.getElementById('newAnswer');
+  const modalEditAInput = document.getElementById('modalEditA');
+  
+  if (newAnswerInput) newAnswerInput.placeholder = placeholderText;
+  if (modalEditAInput) modalEditAInput.placeholder = placeholderText;
+
+  // 🌟 「自動変換とは？」ボタンの制御
+  let wrapper = document.getElementById('chemHelpBtnWrapper');
+  if (hasChem) {
+    if (!wrapper) {
+      // 1行まるごと占有するブロックを作成（右カラムの幅に合わせる）
+      wrapper = document.createElement('div');
+      wrapper.id = 'chemHelpBtnWrapper';
+      wrapper.style.display = 'flex';
+      wrapper.style.justifyContent = 'flex-end'; // 右寄せにする
+      wrapper.style.width = '100%';
+      wrapper.style.marginBottom = '8px';        // 下の白いボックス（.config-box）との隙間
+
+      // ボタン本体を作成
+      const helpBtn = document.createElement('button');
+      helpBtn.id = 'chemHelpBtn';
+      helpBtn.textContent = '❓ 自動変換とは？';
+      
+      // アプリのCSSデザインに合わせた、スッキリして押しやすい白ベースのボタン
+      helpBtn.style.backgroundColor = '#ffffff';
+      helpBtn.style.color = '#2196f3';          // アプリのメインテーマの青色
+      helpBtn.style.border = '1px solid #2196f3';
+      helpBtn.style.borderRadius = '4px';
+      helpBtn.style.padding = '5px 12px';
+      helpBtn.style.fontSize = '0.85rem';       // 「まとめて削除」ボタンとサイズ感を統一
+      helpBtn.style.cursor = 'pointer';
+      helpBtn.style.fontFamily = 'inherit';     // フォントを統一
+      helpBtn.style.fontWeight = 'bold';
+      helpBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+      helpBtn.style.transition = 'background 0.2s';
+
+      // ホバー効果（マウスを乗せた時に少し背景を青っぽくする）
+      helpBtn.onmouseenter = () => { helpBtn.style.backgroundColor = '#e3f2fd'; };
+      helpBtn.onmouseleave = () => { helpBtn.style.backgroundColor = '#ffffff'; };
+      
+      helpBtn.onclick = () => { showChemHelpModal(); };
+      wrapper.appendChild(helpBtn);
+
+      // 💡 右側のカラム（.right-column）の一番上、つまり白いボックスの完全に「外側（真上）」に挿入
+      const rightColumn = document.querySelector('.right-column');
+      if (rightColumn) {
+        const whiteBox = rightColumn.querySelector('.config-box');
+        if (whiteBox) {
+          rightColumn.insertBefore(wrapper, whiteBox);
+        }
+      }
+    }
+    wrapper.style.display = 'flex'; // 化学タグがある時は表示
+  } else {
+    if (wrapper) wrapper.style.display = 'none'; // ない時は非表示（上の隙間も完全に消えます）
+  }
+}
+
+// 💡 「自動変換とは？」ボタンを押した時に、すべての変換ルールを網羅した説明を表示する関数
+function showChemHelpModal() {
+  let chemModal = document.getElementById('chemHelpModal');
+  
+  if (!chemModal) {
+    chemModal = document.createElement('div');
+    chemModal.id = 'chemHelpModal';
+    chemModal.className = 'modal-overlay';
+    chemModal.style.display = 'flex';
+    
+    const modalBox = document.createElement('div');
+    modalBox.className = 'modal-box';
+    // 横幅を標準より少し広げて、解説の左右のガタつきを無くし綺麗に見せます
+    modalBox.style.maxWidth = '550px'; 
+    modalBox.style.textAlign = 'left';
+    modalBox.style.maxHeight = '80vh';     // 画面からはみ出さないように縦幅を制限
+    modalBox.style.overflowY = 'auto';     // スマホ等で溢れたらスクロールできるように
+    
+    modalBox.innerHTML = `
+      <h3 style="text-align: center; color: #2196f3; margin-bottom: 18px; border-bottom: 2px solid #e3f2fd; padding-bottom: 10px;">🧪 化学式・イオン自動変換マニュアル</h3>
+      
+      <p style="font-size: 0.95rem; line-height: 1.6; margin-bottom: 15px; color: #555;">
+        「化学」タグがあるリストでは、普通にキーボードで打ち込むだけで、システムが数字や記号を認識して自動的に正しい化学表記へと変換します。
+      </p>
+
+      ---
+
+      <h4 style="margin: 12px 0 6px 0; color: #2c3e50;">1️⃣ 分子式・組成式（数字が小さくなる）</h4>
+      <p style="font-size: 0.85rem; color: #666; margin: 0 0 8px 0;">元素記号の後ろにつく数字を、自動的に「下付き文字」にします。</p>
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 15px; background: #fafafa;">
+        <tr style="border-bottom: 1px solid #eee;"><th style="padding: 6px; text-align: left; color:#777;">入力する文字</th><th style="padding: 6px; text-align: left; color:#2196f3;">変換後の表示</th></tr>
+        <tr><td style="padding: 6px;">H2O</td><td style="padding: 6px; font-weight:bold;">H₂O</td></tr>
+        <tr><td style="padding: 6px;">CO2</td><td style="padding: 6px; font-weight:bold;">CO₂</td></tr>
+        <tr><td style="padding: 6px;">C6H12O6</td><td style="padding: 6px; font-weight:bold;">C₆H₁₂O₆</td></tr>
+      </table>
+
+      <h4 style="margin: 12px 0 6px 0; color: #2c3e50;">2️⃣ イオン・組成式（価数が右上につく）</h4>
+      <p style="font-size: 0.85rem; color: #666; margin: 0 0 8px 0;">数字のあとに「+」や「-」を入れると、自動的に「上付き文字（価数）」になります。</p>
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 15px; background: #fafafa;">
+        <tr style="border-bottom: 1px solid #eee;"><th style="padding: 6px; text-align: left; color:#777;">入力する文字</th><th style="padding: 6px; text-align: left; color:#2196f3;">変換後の表示</th></tr>
+        <tr><td style="padding: 6px;">Na+</td><td style="padding: 6px; font-weight:bold;">Na⁺</td></tr>
+        <tr><td style="padding: 6px;">Cu2+</td><td style="padding: 6px; font-weight:bold;">Cu²⁺</td></tr>
+        <tr><td style="padding: 6px;">OH-</td><td style="padding: 6px; font-weight:bold;">OH⁻</td></tr>
+        <tr><td style="padding: 6px;">SO42-</td><td style="padding: 6px; font-weight:bold;">SO₄²⁻ <span style="font-size:0.75rem; color:gray; font-weight:normal;">(下付きと上付きの組み合わせもOK)</span></td></tr>
+      </table>
+
+      <h4 style="margin: 12px 0 6px 0; color: #2c3e50;">3️⃣ 化学反応式・状態記号（その他のルール）</h4>
+      <p style="font-size: 0.85rem; color: #666; margin: 0 0 8px 0;">先頭の大文字（係数）や、矢印・沈殿記号などもスマートに処理されます。</p>
+      <div style="background-color: #f1f8ff; padding: 10px; border-radius: 6px; font-size: 0.9rem; border-left: 4px solid #2196f3; line-height: 1.6;">
+        • <b>物質の前の数字（係数）</b>：大文字のままになり、小さくなりません（例: <code>2H2 + O2 -&gt; 2H2O</code> ➔ <b>2H₂ + O₂ ➔ 2H₂O</b>）<br>
+        • <b>矢印や沈殿</b>：<code>-&gt;</code> は自動で <b>➔</b> に、矢印記号等もきれいに維持されます。
+      </div>
+
+      ---
+
+      <p style="font-size: 0.85rem; color: #e53935; font-weight: bold; margin: 15px 0 20px 0; text-align: center;">
+        💡 登録時も、テストの解答時も、普段どおりそのまま入力して大丈夫です！
+      </p>
+      
+      <div class="modal-buttons">
+        <button onclick="closeChemHelpModal()" class="btn btn-action" style="width: 100%; background-color: #2196f3; padding: 12px;">確認しました！</button>
+      </div>
+    `;
+    
+    chemModal.appendChild(modalBox);
+    document.body.appendChild(chemModal);
+  } else {
+    chemModal.style.display = 'flex';
+  }
+}
+
+// 💡 モーダルを閉じる関数
+function closeChemHelpModal() {
+  const chemModal = document.getElementById('chemHelpModal');
+  if (chemModal) {
+    chemModal.style.display = 'none';
+  }
+}
