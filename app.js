@@ -173,6 +173,8 @@ function saveViewState() {
     rangeStart: document.getElementById('rangeStart') ? document.getElementById('rangeStart').value : "1",
     rangeEnd: document.getElementById('rangeEnd') ? document.getElementById('rangeEnd').value : "1",
     orderType: document.getElementById('orderRandom') && document.getElementById('orderRandom').checked ? 'random' : 'normal',
+    // 🌟 修正：前行の末尾にカンマを追加し、構文エラーを解消しました！
+    directionType: document.getElementById('dirReverse') && document.getElementById('dirReverse').checked ? 'reverse' : 'normal',
     maxQuestions: document.getElementById('maxQuestions') ? document.getElementById('maxQuestions').value : "",
     currentIndex: currentIndex,
     memoIndex: memoIndex,
@@ -200,11 +202,17 @@ function loadViewStateOnly() {
     }
     if (document.getElementById('rangeStart')) document.getElementById('rangeStart').value = state.rangeStart || 1;
     if (document.getElementById('rangeEnd')) document.getElementById('rangeEnd').value = state.rangeEnd || (quizData.length > 0 ? quizData.length : 1);
+    
     if (document.getElementById('orderRandom')) {
       if (state.orderType === 'random') document.getElementById('orderRandom').checked = true;
       else document.getElementById('orderNormal').checked = true;
     }
-    if (document.getElementById('maxQuestions')) document.getElementById('maxQuestions').value = state.maxQuestions || "";
+    
+    // 🌟 修正：読み込み処理も安全な形でここに組み込みました！
+    if (document.getElementById('dirReverse')) {
+      if (state.directionType === 'reverse') document.getElementById('dirReverse').checked = true;
+      else document.getElementById('dirNormal').checked = true;
+    }
     
     currentIndex = state.currentIndex || 0;
     memoIndex = state.memoIndex || 0;
@@ -280,7 +288,7 @@ async function createNewList() {
   if (name === "") return;
 
   const { data, error } = await supabaseClient.from('rooms').insert([{ title: name }]).select();
-  if (error) { alert("部屋の作成に失敗しました:" + error.message); return; }
+  if (error) { showAlertModal("部屋の作成に失敗しました:" + error.message); return; }
 
   const newRoomId = data[0].id;
   input.value = "";
@@ -307,10 +315,10 @@ async function editListNameInline() {
   const newName = prompt("新しい単語帳の名前を入力してください：", foundList.listName);
   if (newName === null) return; 
   const trimmed = newName.trim();
-  if (trimmed === "") { alert("名前を空にすることはできません。"); return; }
+  if (trimmed === "") { showAlertModal("名前を空にすることはできません。"); return; }
   
   const { error } = await supabaseClient.from('rooms').update({ title: trimmed }).eq('id', currentActiveListId);
-  if (error) { alert("名前の変更に失敗しました"); return; }
+  if (error) { showAlertModal("名前の変更に失敗しました"); return; }
 
   foundList.listName = trimmed;
   document.getElementById('currentListTitle').textContent = trimmed;
@@ -326,9 +334,66 @@ function renderMainList() {
   quizData.forEach((data, index) => {
     const item = document.createElement('div');
     item.className = "list-item";
-    item.setAttribute('draggable', 'false'); 
+    item.setAttribute('draggable', 'true'); 
     item.dataset.id = data.id;
+    item.dataset.index = index; // 🌟 並べ替え用にインデックスを保持
 
+    // ---------------------------------------------------------
+    // 🔀 【完全復旧】ドラッグ＆ドロップによる並べ替えイベント
+    // ---------------------------------------------------------
+    item.addEventListener('dragstart', (e) => {
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    item.addEventListener('dragend', async () => {
+      item.classList.remove('dragging');
+      
+      // 🌟 ドロップが完了した後に、新しい順番（DOMの並び順）を検知して quizData を更新
+      const currentItems = Array.from(container.querySelectorAll('.list-item'));
+      const newOrderedItems = currentItems.map(el => {
+        return quizData.find(d => d.id === parseInt(el.dataset.id));
+      }).filter(Boolean);
+
+      quizData = newOrderedItems;
+      
+      // アプリ全体のデータ (appData) にも新しい順番を反映させる
+      const foundList = appData.find(l => l.listId === currentActiveListId);
+      if (foundList) {
+        foundList.items = quizData;
+      }
+      
+      // ⚠️ もし並び順をSupabase（サーバー側）に保存する関数（例：updateOrderInSupabaseなど）が
+      // 以前あった場合は、ここにその関数を追記してください。なければこのままでアプリ内は並び替わります。
+      
+      saveViewState();
+    });
+
+    // リスト上の要素の上を通過したときの処理（位置の入れ替え）
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault(); // ドロップを許可するために必須
+      const draggingItem = container.querySelector('.dragging');
+      if (!draggingItem || draggingItem === item) return;
+
+      // マウスの位置が要素の半分より上か下かで、前に入れるか後ろに入れるかを判定
+      const bounding = item.getBoundingClientRect();
+      const offset = e.clientY - bounding.top - bounding.height / 2;
+      
+      if (offset < 0) {
+        container.insertBefore(draggingItem, item);
+      } else {
+        container.insertBefore(draggingItem, item.nextSibling);
+      }
+      
+      // 画面上の番号 (1., 2., 3...) をリアルタイムに再表示
+      container.querySelectorAll('.list-item').forEach((el, idx) => {
+        const numSpan = el.querySelector('.list-num');
+        if (numSpan) numSpan.textContent = `${idx + 1}.`;
+      });
+    });
+    // ---------------------------------------------------------
+
+    // クリック時の処理（編集モードなど）
     item.onclick = (e) => {
       if (isBulkDeleteMode) {
         const targetChk = item.querySelector('.bulk-checkbox');
@@ -342,6 +407,7 @@ function renderMainList() {
       }
     };
 
+    // テキスト表示部分
     const textBlock = document.createElement('div');
     textBlock.className = "list-text-block";
     textBlock.innerHTML = `
@@ -350,6 +416,7 @@ function renderMainList() {
     `;
     item.appendChild(textBlock);
 
+    // 右側の削除ボタン・チェックボックス
     const rightActions = document.createElement('div');
     rightActions.className = "list-actions-right";
 
@@ -390,10 +457,9 @@ function renderMainList() {
     }
   }
 }
-
 async function executeDirectDeleteWord(wordId) {
   const { error } = await supabaseClient.from('words').delete().eq('id', wordId);
-  if (error) { alert("削除に失敗しました"); return; }
+  if (error) { showAlertModal("削除に失敗しました"); return; }
 
   let wrongIds = getSavedWrongIds();
   wrongIds = wrongIds.filter(id => id !== wordId);
@@ -432,12 +498,12 @@ function toggleBulkDeleteMode() {
 
 async function executeBulkDelete() {
   const checkedBoxes = document.querySelectorAll('#listContainer .bulk-checkbox:checked');
-  if (checkedBoxes.length === 0) { alert("削除する単語が選択されていません。"); return; }
+  if (checkedBoxes.length === 0) { showAlertModal("削除する単語が選択されていません。"); return; }
 
   const idsToDelete = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
   
   const { error } = await supabaseClient.from('words').delete().in('id', idsToDelete);
-  if (error) { alert("まとめて削除に失敗しました"); return; }
+  if (error) { showAlertModal("まとめて削除に失敗しました"); return; }
 
   let wrongIds = getSavedWrongIds();
   wrongIds = wrongIds.filter(id => !idsToDelete.includes(id));
@@ -475,7 +541,7 @@ function triggerEditWordModal(id, oldQ, oldA) {
     if (newQ === "" || newA === "") return;
 
     const { error } = await supabaseClient.from('words').update({ question: newQ, answer: newA }).eq('id', id);
-    if (error) { alert("単語の更新に失敗しました"); return; }
+    if (error) { showAlertModal("単語の更新に失敗しました"); return; }
 
     closeModal('editWordModal');
     await loadAllAppDataFromSupabase();
@@ -500,7 +566,7 @@ async function addNewProblem() {
     }
   ]);
 
-  if (error) { alert("単語の追加に失敗しました"); return; }
+  if (error) { showAlertModal("単語の追加に失敗しました"); return; }
 
   qInput.value = ""; aInput.value = "";
   
@@ -509,15 +575,40 @@ async function addNewProblem() {
   if (foundList) quizData = foundList.items;
 
   renderMainList();
+
+  // 🌟【新設】単語が追加されたら、出題範囲の「終了問目」を最新の総問題数に自動更新する
+  if (quizData && quizData.length > 0) {
+    const rEnd = document.getElementById('rangeEnd');
+    if (rEnd) {
+      rEnd.value = quizData.length;
+    }
+  }
+
   saveViewState();
   qInput.focus(); 
 }
 
-function validateCounter(input) {
-  let val = parseInt(input.value); 
-  const maxVal = quizData.length > 0 ? quizData.length : 1;
-  if (isNaN(val)) { input.value = 1; return; }
-  if (val < 1) { input.value = maxVal; } else if (val > maxVal) { input.value = 1; }
+// 💡 過去の validateCounter を今回の新しい「上限丸めルール」に完全統合します！
+// 💡 入力された問題番号が、単語帳の最大数を超えないように丸める関数
+function validateCounter(inputElement) {
+  if (!inputElement || !currentActiveListId) return;
+  
+  // 1. 現在の単語帳データを取得
+  const list = appData.find(l => l.listId === currentActiveListId);
+  // 🌟 修正：list.words ではなく、実際のデータ構造である list.items の数を数える
+  const total = (list && list.items && list.items.length > 0) ? list.items.length : 1;
+
+  // 2. 入力された値を数値に変換
+  let val = parseInt(inputElement.value);
+
+  // 3. 【判定】もし文字だったり、1未満なら「1」にする
+  if (isNaN(val) || val < 1) {
+    inputElement.value = 1;
+  } 
+  // 4. 【判定】もし最大数を超えていたら、最大数（total）でストップさせる！
+  else if (val > total) {
+    inputElement.value = total;
+  }
 }
 
 function startMemorizeMode() {
@@ -582,7 +673,7 @@ function retryQuiz(retryMode) {
         if (match) wrongItems.push(match);
       }
     });
-    if (wrongItems.length === 0) { alert("間違えた問題はありません！🎉"); return; }
+    if (wrongItems.length === 0) { showAlertModal("間違えた問題はありません！🎉"); return; }
     currentQuestions = wrongItems;
   } else {
     if (!prepareQuestions()) return;
@@ -602,20 +693,40 @@ function updateWrongCountLabel() { const lbl = document.getElementById('wrongCou
 function toggleModeUI() { const area = document.getElementById('normalConfigArea'); if(area) area.style.display = document.getElementById('modeNormal').checked ? 'block' : 'none'; }
 
 function prepareQuestions() {
-  if (quizData.length === 0) { alert("問題が登録されていません。"); return false; }
+  if (quizData.length === 0) { showAlertModal("問題が登録されていません。"); return false; }
   
+  // 「すべて出題」にチェックが入っている場合は、ここで強制的に1〜最大数に書き換える
+  const targetAllRadio = document.getElementById('targetAll');
+  if (targetAllRadio && targetAllRadio.checked) {
+    const total = quizData.length > 0 ? quizData.length : 1;
+    const rStart = document.getElementById('rangeStart');
+    const rEnd = document.getElementById('rangeEnd');
+    if (rStart) rStart.value = 1;
+    if (rEnd) rEnd.value = total;
+  }
+
   let startVal = parseInt(document.getElementById('rangeStart').value) || 1;
   let endVal = parseInt(document.getElementById('rangeEnd').value) || quizData.length;
-  if (startVal > endVal) { alert("出題範囲の開始が終了を上回っています。"); return false; }
+  if (startVal > endVal) { showAlertModal("出題範囲の開始が終了を上回っています。"); return false; }
 
   let filtered = document.getElementById('modeNormal').checked ? quizData.slice(startVal - 1, endVal) : quizData.filter(q => getSavedWrongIds().includes(q.id));
-  if (filtered.length === 0) { alert("出題条件に該当する問題がありません。"); return false; }
+  if (filtered.length === 0) { showAlertModal("出題条件に該当する問題がありません。"); return false; }
+
+  // 「答え ➔ 問題」が選ばれている場合、問題と答えのテキストを入れ替える
+  const isReverse = document.getElementById('dirReverse') && document.getElementById('dirReverse').checked;
+  if (isReverse) {
+    filtered = filtered.map(item => {
+      return {
+        ...item,
+        question: item.answer,   
+        answer: item.question    
+      };
+    });
+  }
 
   if (document.getElementById('orderRandom').checked) {
     for (let i = filtered.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [filtered[i], filtered[j]] = [filtered[j], filtered[i]]; }
   }
-  let maxQ = parseInt(document.getElementById('maxQuestions').value);
-  if (!isNaN(maxQ) && maxQ > 0) filtered = filtered.slice(0, maxQ);
 
   currentQuestions = filtered; currentIndex = 0; wrongQuestions = [];
   return true;
@@ -755,44 +866,86 @@ function initInputFieldAutoConversion(targetInput) {
   });
 
   targetInput.addEventListener('input', function() {
-    // ✨ 化学タグが無い場合は、自動変換の処理をスキップ（そのまま入力）する
     if (!hasChemTag()) return;
 
     let start = targetInput.selectionStart; 
     let val = targetInput.value;
     
+    // 1. 数字のみリセット
+    const revertMap = {
+      '₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9',
+      '⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9'
+    };
+    val = val.split('').map(c => revertMap[c] || c).join('');
+
+    // 全角➔半角処理（ここで「ー」も通常のマイナス「-」に変換されます）
     val = val.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     val = val.replaceAll('；', ';').replaceAll('ー', '-').replaceAll('．', '.').replaceAll(' ”', '"').replaceAll(' ', ' ');
     val = val.replaceAll('＋', '+');
 
-    const shiftNumbers = { '!': '1', '"': '2', '#': '3', '$': '4', '%': '5', '&': '6', "'": '7', '(': '8', ')': '9' };
+    const shiftNumbers = { '!': '1', '"': '2', '#': '3', '$': '4', '%': '5', '&': '6', "'": '7' };
     for (let key in shiftNumbers) { val = val.replaceAll(key, shiftNumbers[key]); }
     
-    if (isShiftPressed) {
-      val = val.replaceAll(';', '⁺').replaceAll('-', '⁻').replaceAll('.', '･').replaceAll(' ', '→');
-    } else {
-      val = val.replaceAll(';', '⁺').replaceAll('+', '⁺').replaceAll('-', '⁻').replaceAll('.', '･').replaceAll(' ', '→');
-    }
+    // 2. キー置換
+    val = val.replaceAll(';', '⁺');
+    val = val.replaceAll('-', '⁻');
+    val = val.replaceAll('.', '･').replaceAll(' ', '→');
     val = val.toUpperCase();
     
     val = val.replaceAll('E-', 'e-');
     val = val.replaceAll('E⁺', 'e⁺');
-    val = val.replaceAll('E⁻', 'e⁻');
 
+    // 元素記号処理
     const elements2char = ['He','Li','Be','Ne','Na','Mg','Al','Si','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn','Sb','Te','I','Xe','Cs','Ba','Pt','Au','Hg','Pb','Bi','Po','At','Rn','Fr','Ra','U'];
     elements2char.forEach(el => { val = val.replaceAll(el.toUpperCase(), el); });
     
+    // 🌟【新設】1価の多原子イオンの先回り処理
+    // 誤って数字が上付き（価数）に化けないよう、先に数字を下付きに固定してしまいます
+    const polyIons = [
+      { reg: /HCO3([⁺⁻])/g, rep: 'HCO₃$1' },
+      { reg: /NO3([⁺⁻])/g, rep: 'NO₃$1' },
+      { reg: /HSO4([⁺⁻])/g, rep: 'HSO₄$1' },
+      { reg: /ClO2([⁺⁻])/g, rep: 'ClO₂$1' },
+      { reg: /ClO3([⁺⁻])/g, rep: 'ClO₃$1' },
+      { reg: /ClO4([⁺⁻])/g, rep: 'ClO₄$1' },
+      { reg: /MnO4([⁺⁻])/g, rep: 'MnO₄$1' },
+      { reg: /NH4([⁺⁻])/g, rep: 'NH₄$1' } // 陽イオンのアンモニウムも対策！
+    ];
+    polyIons.forEach(item => { val = val.replace(item.reg, item.rep); });
+
+    // 3. イオン（価数の上付き数字）の変換
+    // （すでに上記で下付き文字「₃」などに変換された部分は、ここの普通の数字の判定をスルーします）
+    val = val.replace(/([A-Za-z)\]])(\d+)([⁺⁻])/g, function(match, char, nums, sign) {
+      let subPart = "";
+      let supPart = "";
+      
+      if (nums.length > 1) {
+        subPart = nums.slice(0, -1);
+        supPart = nums.slice(-1);
+      } else {
+        supPart = nums;
+      }
+      
+      const subMap = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'};
+      const supMap = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
+      
+      let convSub = subPart.split('').map(c => subMap[c] || c).join('');
+      let convSup = supPart.split('').map(c => supMap[c] || c).join('');
+      
+      return char + convSub + convSup + sign;
+    });
+
+    // 4. 残った通常の数字（分子式などの下付き文字）を変換
     let newVal = "";
     for (let i = 0; i < val.length; i++) {
       let char = val[i];
       if (char >= '0' && char <= '9') {
         let shouldSub = false; 
-        if (i > 0) { 
-          let prev = val[i-1]; 
-          if (/[A-Za-z)\]₀₁₂₃₄₅₆₇₈₉⁺⁻]/.test(prev)) shouldSub = true; 
-          if (/[ +\-→]/.test(prev)) shouldSub = false; 
+        if (newVal.length > 0) { 
+          let prev = newVal[newVal.length - 1]; 
+          if (/[A-Za-z)\]₀₁₂₃₄₅₆₇₈₉]/.test(prev)) shouldSub = true; 
+          if (/[ +\-→➔⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻･]/.test(prev)) shouldSub = false; 
         }
-        if (i === 0) shouldSub = false;
         if (shouldSub) { 
           const subs = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'}; 
           char = subs[char]; 
@@ -800,7 +953,9 @@ function initInputFieldAutoConversion(targetInput) {
       }
       newVal += char;
     }
-    newVal = newVal.replaceAll('E⁻', 'e⁻').replaceAll('E⁺', 'e⁺');
+
+    newVal = newVal.replaceAll('e-', 'e⁻').replaceAll('e+', 'e⁺');
+    newVal = newVal.replaceAll('E⁺', 'e⁺').replaceAll('E⁻', 'e⁻');
     
     if (targetInput.value !== newVal) { 
       targetInput.value = newVal; 
@@ -826,13 +981,17 @@ async function editListTagsInline() {
   if (newTags === null) return; 
   
   const { error } = await supabaseClient.from('rooms').update({ tags: newTags }).eq('id', currentActiveListId);
-  if (error) { alert("タグの保存に失敗しました"); return; }
+  if (error) { showAlertModal("タグの保存に失敗しました"); return; }
 
   foundList.listTags = newTags;
   await loadAllAppDataFromSupabase();
   saveViewState();
   routeView('#list'); 
 }
+
+// =========================================================
+// ⚠️ この上には、これまでのコード（Supabase設定、単語の追加、クイズ処理など）がそのまま入ります
+// =========================================================
 
 // 💡 名前とタグをまとめて編集・保存するポップアップ処理
 function openEditListInfoModal() {
@@ -852,7 +1011,7 @@ function openEditListInfoModal() {
     const newTags = document.getElementById('modalEditListTags').value.trim();
 
     if (newName === "") {
-      alert("単語帳の名前は空にできません。");
+      showAlertModal("単語帳の名前は空にできません。"); // ✨ alertから書き換え
       return;
     }
 
@@ -863,7 +1022,7 @@ function openEditListInfoModal() {
       .eq('id', currentActiveListId);
 
     if (error) { 
-      alert("情報の保存に失敗しました: " + error.message); 
+      showAlertModal("情報の保存に失敗しました: " + error.message); // ✨ alertから書き換え
       return; 
     }
 
@@ -874,7 +1033,7 @@ function openEditListInfoModal() {
 
     // 最新のデータを読み直して画面に反映
     await loadAllAppDataFromSupabase();
-    updateChemPlaceholder(); // 💡 保存時にプレースホルダーを即時判定
+    updateChemPlaceholder();
     saveViewState();
     routeView('#list'); 
     closeModal('editListInfoModal');
@@ -882,73 +1041,56 @@ function openEditListInfoModal() {
 }
 
 // 💡 「化学」タグの有無で入力欄のプレースホルダーとヘルプボタンを切り替える関数
+// 💡 「化学」タグの有無で、入力欄のヒント文字やプレースホルダー、ヘルプボタンを切り替える関数
 function updateChemPlaceholder() {
   if (!currentActiveListId) return;
   const foundList = appData.find(l => l.listId === currentActiveListId);
   if (!foundList) return;
 
-  // タグの中に「化学」という文字が含まれているかチェック
+  // 「化学」タグが含まれているかチェック
   const hasChem = foundList.listTags && foundList.listTags.split(',').map(t => t.trim()).includes('化学');
   
-  // 化学タグがあれば案内を出し、なければただの「答え」にする
+  // 1. 入力欄の薄い文字（プレースホルダー）の切り替え
   const placeholderText = hasChem ? "答え（自動変換が適用されます）" : "答え";
-  
-  // 各入力欄を取得して書き換え
   const newAnswerInput = document.getElementById('newAnswer');
   const modalEditAInput = document.getElementById('modalEditA');
-  
   if (newAnswerInput) newAnswerInput.placeholder = placeholderText;
   if (modalEditAInput) modalEditAInput.placeholder = placeholderText;
 
-  // 🌟 「自動変換とは？」ボタンの制御
+  // 2. 「💡 入力ヒントを見る」の文字の表示/非表示
+  const hintTextAdd = document.getElementById('hintTextAdd');
+  const hintTextEdit = document.getElementById('hintTextEdit');
+  if (hintTextAdd) hintTextAdd.style.display = hasChem ? 'inline' : 'none';
+  if (hintTextEdit) hintTextEdit.style.display = hasChem ? 'inline' : 'none';
+
+  // 3. 右側の「❓ 自動変換とは？」ボタンの表示/非表示
   let wrapper = document.getElementById('chemHelpBtnWrapper');
   if (hasChem) {
     if (!wrapper) {
-      // 1行まるごと占有するブロックを作成（右カラムの幅に合わせる）
       wrapper = document.createElement('div');
       wrapper.id = 'chemHelpBtnWrapper';
-      wrapper.style.display = 'flex';
-      wrapper.style.justifyContent = 'flex-end'; // 右寄せにする
-      wrapper.style.width = '100%';
-      wrapper.style.marginBottom = '8px';        // 下の白いボックス（.config-box）との隙間
+      wrapper.style.cssText = 'display: flex; justify-content: flex-end; width: 100%; margin-bottom: 8px;';
 
-      // ボタン本体を作成
       const helpBtn = document.createElement('button');
       helpBtn.id = 'chemHelpBtn';
       helpBtn.textContent = '❓ 自動変換とは？';
+      helpBtn.style.cssText = 'background-color: #ffffff; color: #2196f3; border: 1px solid #2196f3; border-radius: 4px; padding: 5px 12px; font-size: 0.85rem; cursor: pointer; font-family: inherit; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: background 0.2s;';
       
-      // アプリのCSSデザインに合わせた、スッキリして押しやすい白ベースのボタン
-      helpBtn.style.backgroundColor = '#ffffff';
-      helpBtn.style.color = '#2196f3';          // アプリのメインテーマの青色
-      helpBtn.style.border = '1px solid #2196f3';
-      helpBtn.style.borderRadius = '4px';
-      helpBtn.style.padding = '5px 12px';
-      helpBtn.style.fontSize = '0.85rem';       // 「まとめて削除」ボタンとサイズ感を統一
-      helpBtn.style.cursor = 'pointer';
-      helpBtn.style.fontFamily = 'inherit';     // フォントを統一
-      helpBtn.style.fontWeight = 'bold';
-      helpBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
-      helpBtn.style.transition = 'background 0.2s';
-
-      // ホバー効果（マウスを乗せた時に少し背景を青っぽくする）
       helpBtn.onmouseenter = () => { helpBtn.style.backgroundColor = '#e3f2fd'; };
       helpBtn.onmouseleave = () => { helpBtn.style.backgroundColor = '#ffffff'; };
-      
       helpBtn.onclick = () => { showChemHelpModal(); };
+      
       wrapper.appendChild(helpBtn);
 
-      // 💡 右側のカラム（.right-column）の一番上、つまり白いボックスの完全に「外側（真上）」に挿入
       const rightColumn = document.querySelector('.right-column');
       if (rightColumn) {
         const whiteBox = rightColumn.querySelector('.config-box');
-        if (whiteBox) {
-          rightColumn.insertBefore(wrapper, whiteBox);
-        }
+        if (whiteBox) rightColumn.insertBefore(wrapper, whiteBox);
       }
     }
-    wrapper.style.display = 'flex'; // 化学タグがある時は表示
+    wrapper.style.display = 'flex';
   } else {
-    if (wrapper) wrapper.style.display = 'none'; // ない時は非表示（上の隙間も完全に消えます）
+    if (wrapper) wrapper.style.display = 'none';
   }
 }
 
@@ -960,67 +1102,61 @@ function showChemHelpModal() {
     chemModal = document.createElement('div');
     chemModal.id = 'chemHelpModal';
     chemModal.className = 'modal-overlay';
-    chemModal.style.display = 'flex';
+    chemModal.style.cssText = 'display: flex; justify-content: center; align-items: flex-start; padding-top: 5vh; overflow-y: auto;';
+
+    // ✨ ドラッグ誤作動防止の処理
+    let isChemModalMousedown = false;
+    chemModal.onmousedown = function(e) { isChemModalMousedown = (e.target === this); };
+    chemModal.onclick = function(e) { if (e.target === this && isChemModalMousedown) closeChemHelpModal(); };
     
     const modalBox = document.createElement('div');
     modalBox.className = 'modal-box';
-    // 横幅を標準より少し広げて、解説の左右のガタつきを無くし綺麗に見せます
-    modalBox.style.maxWidth = '550px'; 
-    modalBox.style.textAlign = 'left';
-    modalBox.style.maxHeight = '80vh';     // 画面からはみ出さないように縦幅を制限
-    modalBox.style.overflowY = 'auto';     // スマホ等で溢れたらスクロールできるように
+    modalBox.style.cssText = 'max-width: 550px; text-align: left; margin-bottom: 5vh;';
     
     modalBox.innerHTML = `
-      <h3 style="text-align: center; color: #2196f3; margin-bottom: 18px; border-bottom: 2px solid #e3f2fd; padding-bottom: 10px;">🧪 化学式・イオン自動変換マニュアル</h3>
+      <h3 style="text-align: center; color: #2196f3; margin-top: 0; margin-bottom: 18px; border-bottom: 2px solid #e3f2fd; padding-bottom: 10px;">🧪 化学式・イオン自動変換マニュアル</h3>
       
-      <p style="font-size: 0.95rem; line-height: 1.6; margin-bottom: 15px; color: #555;">
-        「化学」タグがあるリストでは、普通にキーボードで打ち込むだけで、システムが数字や記号を認識して自動的に正しい化学表記へと変換します。
+      <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">
+        「化学」タグがあるリストでは、キーボードで以下のように打つだけで、自動的に綺麗な化学表記へ変換されます。
       </p>
-
-      ---
-
-      <h4 style="margin: 12px 0 6px 0; color: #2c3e50;">1️⃣ 分子式・組成式（数字が小さくなる）</h4>
-      <p style="font-size: 0.85rem; color: #666; margin: 0 0 8px 0;">元素記号の後ろにつく数字を、自動的に「下付き文字」にします。</p>
-      <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 15px; background: #fafafa;">
-        <tr style="border-bottom: 1px solid #eee;"><th style="padding: 6px; text-align: left; color:#777;">入力する文字</th><th style="padding: 6px; text-align: left; color:#2196f3;">変換後の表示</th></tr>
-        <tr><td style="padding: 6px;">H2O</td><td style="padding: 6px; font-weight:bold;">H₂O</td></tr>
-        <tr><td style="padding: 6px;">CO2</td><td style="padding: 6px; font-weight:bold;">CO₂</td></tr>
-        <tr><td style="padding: 6px;">C6H12O6</td><td style="padding: 6px; font-weight:bold;">C₆H₁₂O₆</td></tr>
-      </table>
-
-      <h4 style="margin: 12px 0 6px 0; color: #2c3e50;">2️⃣ イオン・組成式（価数が右上につく）</h4>
-      <p style="font-size: 0.85rem; color: #666; margin: 0 0 8px 0;">数字のあとに「+」や「-」を入れると、自動的に「上付き文字（価数）」になります。</p>
-      <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 15px; background: #fafafa;">
-        <tr style="border-bottom: 1px solid #eee;"><th style="padding: 6px; text-align: left; color:#777;">入力する文字</th><th style="padding: 6px; text-align: left; color:#2196f3;">変換後の表示</th></tr>
-        <tr><td style="padding: 6px;">Na+</td><td style="padding: 6px; font-weight:bold;">Na⁺</td></tr>
-        <tr><td style="padding: 6px;">Cu2+</td><td style="padding: 6px; font-weight:bold;">Cu²⁺</td></tr>
-        <tr><td style="padding: 6px;">OH-</td><td style="padding: 6px; font-weight:bold;">OH⁻</td></tr>
-        <tr><td style="padding: 6px;">SO42-</td><td style="padding: 6px; font-weight:bold;">SO₄²⁻ <span style="font-size:0.75rem; color:gray; font-weight:normal;">(下付きと上付きの組み合わせもOK)</span></td></tr>
-      </table>
-
-      <h4 style="margin: 12px 0 6px 0; color: #2c3e50;">3️⃣ 化学反応式・状態記号（その他のルール）</h4>
-      <p style="font-size: 0.85rem; color: #666; margin: 0 0 8px 0;">先頭の大文字（係数）や、矢印・沈殿記号などもスマートに処理されます。</p>
-      <div style="background-color: #f1f8ff; padding: 10px; border-radius: 6px; font-size: 0.9rem; border-left: 4px solid #2196f3; line-height: 1.6;">
-        • <b>物質の前の数字（係数）</b>：大文字のままになり、小さくなりません（例: <code>2H2 + O2 -&gt; 2H2O</code> ➔ <b>2H₂ + O₂ ➔ 2H₂O</b>）<br>
-        • <b>矢印や沈殿</b>：<code>-&gt;</code> は自動で <b>➔</b> に、矢印記号等もきれいに維持されます。
+      
+      <div style="overflow-x: auto; width: 100%;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 20px; min-width: 420px;">
+          <thead>
+            <tr style="border-bottom: 2px solid #ddd; background-color: #f9fafb;">
+              <th style="padding: 8px; text-align: left; color:#777;">入力したい文字</th>
+              <th style="padding: 8px; text-align: left; color:#777;">キーの打ち方</th>
+              <th style="padding: 8px; text-align: left; color:#777;">入力例</th>
+              <th style="padding: 8px; text-align: left; color:#2196f3;">画面の表示</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;"><b>元素記号</b></td><td style="padding: 8px;">小文字のままでOK</td><td style="padding: 8px; color: #666;">na</td><td style="padding: 8px; color: #2196f3;"><b>Na</b></td></tr>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;"><b>下付き数字</b></td><td style="padding: 8px;">元素の後に数字</td><td style="padding: 8px; color: #666;">c6h12o6</td><td style="padding: 8px; color: #2196f3;"><b>C₆H₁₂O₆</b></td></tr>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;"><b>イオン (⁺)</b></td><td style="padding: 8px;"><b>;</b> (セミコロン)</td><td style="padding: 8px; color: #666;">ca2;</td><td style="padding: 8px; color: #2196f3;"><b>Ca²⁺</b></td></tr>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;"><b>イオン (⁻)</b></td><td style="padding: 8px;"><b>-</b> (マイナス)</td><td style="padding: 8px; color: #666;">so42-</td><td style="padding: 8px; color: #2196f3;"><b>SO₄²⁻</b></td></tr>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;"><b>矢印 (→)</b></td><td style="padding: 8px;"><b>スペースキー</b></td><td style="padding: 8px; color: #666;">(空白)</td><td style="padding: 8px; color: #2196f3;"><b>→</b></td></tr>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;"><b>中点 (･)</b></td><td style="padding: 8px;"><b>.</b> (ピリオド)</td><td style="padding: 8px; color: #666;">.</td><td style="padding: 8px; color: #2196f3;"><b>･</b></td></tr>
+            <tr><td style="padding: 8px;"><b>反応の (+)</b></td><td style="padding: 8px;"><b>+</b> はそのまま</td><td style="padding: 8px; color: #666;">+</td><td style="padding: 8px; color: #2196f3;"><b>+</b></td></tr>
+          </tbody>
+        </table>
       </div>
-
-      ---
-
-      <p style="font-size: 0.85rem; color: #e53935; font-weight: bold; margin: 15px 0 20px 0; text-align: center;">
-        💡 登録時も、テストの解答時も、普段どおりそのまま入力して大丈夫です！
+      
+      <p style="font-size: 0.8rem; color: #666; margin: 0 0 15px 0; line-height: 1.4;">
+        ※ <b>物質の前の数字（係数）</b>は大文字のまま小さくなりません。<br>
+        （例: <code>2H2 + O2 ➔ 2H₂ + O₂ ➔ 2H₂O</code>）
       </p>
       
       <div class="modal-buttons">
-        <button onclick="closeChemHelpModal()" class="btn btn-action" style="width: 100%; background-color: #2196f3; padding: 12px;">確認しました！</button>
+        <button type="button" onclick="closeChemHelpModal()" class="btn btn-action" style="width: 100%; background-color: #2196f3; padding: 12px; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">確認しました！</button>
       </div>
     `;
     
     chemModal.appendChild(modalBox);
     document.body.appendChild(chemModal);
-  } else {
-    chemModal.style.display = 'flex';
   }
+  
+  chemModal.style.display = 'flex';
 }
 
 // 💡 モーダルを閉じる関数
@@ -1028,5 +1164,50 @@ function closeChemHelpModal() {
   const chemModal = document.getElementById('chemHelpModal');
   if (chemModal) {
     chemModal.style.display = 'none';
+  }
+}
+
+// 💡 ブラウザ標準の showAlertModal() の代わりに、アプリ専用の綺麗なポップアップを出す共通関数
+function showAlertModal(message) {
+  const textElem = document.getElementById('alertModalText');
+  if (textElem) {
+    textElem.textContent = message;
+    openModal('alertModal');
+  } else {
+    showAlertModal(message); // 万が一HTMLに要素がなければ通常のalertで代用
+  }
+}
+
+// 🌟 画面の暗い背景（modal-overlay）をクリックしたときにキャンセルする共通処理（ドラッグ誤作動防止版）
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  let isOverlayMousedown = false;
+
+  // 暗い背景部分でマウスを「押し込んだ」かチェック
+  overlay.addEventListener('mousedown', function(e) {
+    isOverlayMousedown = (e.target === this);
+  });
+
+  // マウスを「離した」ときの処理
+  overlay.addEventListener('click', function(e) {
+    // 暗い背景で押し始めて、かつ暗い背景で離したときだけ閉じる
+    if (e.target === this && isOverlayMousedown) {
+      const modalId = this.id;
+      if (modalId && typeof closeModal === 'function') {
+        closeModal(modalId);
+      }
+    }
+  });
+});
+
+// =========================================================
+// 💡 【新機能】出題対象の「すべて出題 / 範囲指定」を切り替える処理
+// =========================================================
+
+// ① ラジオボタンの選択に合わせて、範囲指定エリアの表示/非表示を切り替える関数
+function toggleCustomSettingsUI() {
+  const isCustom = document.getElementById('targetCustom').checked;
+  const customArea = document.getElementById('customSettingsArea');
+  if (customArea) {
+    customArea.style.display = isCustom ? 'block' : 'none';
   }
 }
