@@ -1,6 +1,3 @@
-// ==========================================
-// ⚡ Supabase 接続設定（ここをご自身のものに書き換してください）
-// ==========================================
 const SUPABASE_URL = 'https://otwqwuidhkbtfniwpzvf.supabase.co'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90d3F3dWlkaGtidGZuaXdwenZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTA0MjYsImV4cCI6MjA5Njk2NjQyNn0.dtPkiYdqo011OpytX6nCvMqiOzrdpEVZ8oj6NXPIsOE'; 
 
@@ -52,11 +49,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   // 1. まず最初にSupabaseから最新データをダウンロードする
   await loadAllAppDataFromSupabase();
 
-  // 2. その後、画面の状態（どこを開いていたか）を復旧
+// 2. その後、画面の状態（どこを開いていたか）を復旧
   loadViewStateOnly();
 
-  // 🌟【新設】ダウンロードと状態復旧が終わった直後に、正しい苦手問題の件数を計算して画面に表示する！
+  // 🌟【新設】状態復旧が終わった直後に、正しい苦手問題の計算とリストの絞り込みを確定させる
   updateWrongCountLabel();
+  renderMainList();
 
   if (!window.location.hash || window.location.hash === '#top') {
     navigateTo('#top');
@@ -306,6 +304,20 @@ function openNotebook(listId) {
   const foundList = appData.find(l => l.listId === listId);
   if (foundList) {
     quizData = foundList.items;
+
+    // 🌟【新設】別の単語帳を開いたときは、強制的に「通常モード」にリセットする
+    const modeNormalRadio = document.getElementById('modeNormal');
+    if (modeNormalRadio) {
+      modeNormalRadio.checked = true; // 通常にチェックを入れる
+    }
+    toggleModeUI(); // 出題設定エリアを再表示し、リストを通常表示に戻す
+
+    // 🌟【新設】新しいリストの件数に合わせて、範囲の初期値と苦手ラベルをセット
+    const currentLen = quizData.length > 0 ? quizData.length : 1;
+    if (document.getElementById('rangeStart')) document.getElementById('rangeStart').value = 1;
+    if (document.getElementById('rangeEnd')) document.getElementById('rangeEnd').value = currentLen;
+    updateWrongCountLabel();
+
     saveViewState();
     navigateTo('#list');
   }
@@ -474,6 +486,10 @@ async function executeDirectDeleteWord(wordId) {
   if (parseInt(document.getElementById('rangeStart').value) > currentLen) {
     document.getElementById('rangeStart').value = currentLen;
   }
+  
+  // 🌟【新設】単語が削除されたので、画面上の「苦手問題数」の表示を最新にする
+  updateWrongCountLabel();
+  
   renderMainList();
   saveViewState();
 }
@@ -523,6 +539,9 @@ async function executeBulkDelete() {
   document.getElementById('bulkDeleteTriggerBtn').style.display = "inline-block";
   document.getElementById('bulkExecuteBtn').style.display = "none";
   document.getElementById('bulkCancelBtn').style.display = "none";
+  
+  // 🌟【新設】一括削除されたので、画面上の「苦手問題数」の表示を最新にする
+  updateWrongCountLabel();
   
   renderMainList();
   saveViewState();
@@ -687,22 +706,48 @@ function retryQuiz(retryMode) {
   routeView('#quiz'); 
 }
 
-function getSavedWrongIds() { return JSON.parse(localStorage.getItem(`chem_wrong_ids_${currentActiveListId}`)) || []; }
-function saveWrongIds(ids) { localStorage.setItem(`chem_wrong_ids_${currentActiveListId}`, JSON.stringify(ids)); updateWrongCountLabel(); }
-// 🌟【修正】現在開いている単語帳（currentActiveListId）の正しい苦手問題数だけを確実に数えるようにします
+// 💡 LocalStorage から苦手IDを取得（型エラーを防ぐため文字列に統一して処理）
+function getSavedWrongIds() { 
+  const rawData = localStorage.getItem(`chem_wrong_ids_${currentActiveListId}`);
+  return rawData ? JSON.parse(rawData).map(id => String(id)) : []; 
+}
+
+function saveWrongIds(ids) { 
+  // 重複を排除し、すべて文字列に変換して保存
+  const uniqueIds = Array.from(new Set(ids.map(id => String(id))));
+  localStorage.setItem(`chem_wrong_ids_${currentActiveListId}`, JSON.stringify(uniqueIds)); 
+  updateWrongCountLabel(); 
+}
+
+// 🌟【バグ修正版】現在の単語帳に「本当に存在する」苦手問題だけを厳密にカウントする
 function updateWrongCountLabel() { 
   const lbl = document.getElementById('wrongCountLabel'); 
   if (!lbl) return;
 
-  // 現在アクティブなリストIDがない場合は 0 にする
   if (!currentActiveListId) {
     lbl.textContent = "0";
     return;
   }
 
-  // 現在のリストに紐づく正しい苦手問題の配列を取得して、その「長さ（件数）」を画面に表示
-  const wrongIds = getSavedWrongIds();
-  lbl.textContent = wrongIds.length; 
+  // 1. LocalStorageに保存されている苦手IDを取得
+  const savedWrongIds = getSavedWrongIds();
+
+  // 2. 現在アクティブな単語帳の「本物の全問題データ」を取得
+  const list = appData.find(l => String(l.listId) === String(currentActiveListId));
+  const realItems = (list && list.items) ? list.items : [];
+
+  // 3. LocalStorageのIDのうち、「現在の単語帳に実在する問題のID」だけを抽出する
+  const validWrongIds = savedWrongIds.filter(id => 
+    realItems.some(item => String(item.id) === String(id))
+  );
+
+  // 4. もしゴミデータ（削除済みの問題など）が混ざっていたら、LocalStorage側も綺麗に掃除する
+  if (savedWrongIds.length !== validWrongIds.length) {
+    localStorage.setItem(`chem_wrong_ids_${currentActiveListId}`, JSON.stringify(validWrongIds));
+  }
+
+  // 5. 正しい件数を画面に反映
+  lbl.textContent = validWrongIds.length; 
 }
 function toggleModeUI() { 
   const area = document.getElementById('normalConfigArea'); 
@@ -728,6 +773,7 @@ function prepareQuestions() {
   let endVal = parseInt(document.getElementById('rangeEnd').value) || quizData.length;
   if (startVal > endVal) { showAlertModal("出題範囲の開始が終了を上回っています。"); return false; }
 
+  // 💡 安全対策：通常モード、または苦手モード時のフィルタリング
   let filtered = document.getElementById('modeNormal').checked ? quizData.slice(startVal - 1, endVal) : quizData.filter(q => getSavedWrongIds().includes(q.id));
   if (filtered.length === 0) { showAlertModal("出題条件に該当する問題がありません。"); return false; }
 
@@ -793,13 +839,16 @@ function checkAnswer() {
   if (submitBtn) submitBtn.disabled = true;
   if (resetBtn) resetBtn.disabled = true;
 
+  // checkAnswer関数内の「正解・不正解処理」の箇所を以下のようにクリーンアップ
   if (isCorrect) {
     lastResultFeedbackHTML = `前問の判定: <span class="prev-correct">⭕ 正解</span>（${currentQ.question} ➔ ${correctAnswer}）`;
-    wrongIds = wrongIds.filter(id => id !== currentQ.id);
+    // 💡 String() で確実に型を合わせて削除
+    wrongIds = wrongIds.filter(id => String(id) !== String(currentQ.id));
   } else {
     lastResultFeedbackHTML = `前問の判定: <span class="prev-wrong">❌ 不正解</span>（${currentQ.question} ➔ 正解: <span style="color:#2196f3;">${correctAnswer}</span>）`;
     wrongQuestions.push(currentQ);
-    if (!wrongIds.includes(currentQ.id)) wrongIds.push(currentQ.id);
+    // 💡 String() で確実に存在チェック
+    if (!wrongIds.includes(String(currentQ.id))) wrongIds.push(String(currentQ.id));
   }
   
   saveWrongIds(wrongIds);
@@ -1229,4 +1278,27 @@ function toggleCustomSettingsUI() {
   if (customArea) {
     customArea.style.display = isCustom ? 'block' : 'none';
   }
+}
+// 💡【新設】「単語をまとめて削除」ボタンを押したときに、チェックボックスの表示を切り替える関数
+function toggleBulkDeleteMode() {
+  // モードを反転させる
+  isBulkDeleteMode = !isBulkDeleteMode;
+
+  const triggerBtn = document.getElementById('bulkDeleteTriggerBtn');
+  const executeBtn = document.getElementById('bulkExecuteBtn');
+  const cancelBtn = document.getElementById('bulkCancelBtn');
+
+  // ボタン類の表示・非表示を切り替え
+  if (isBulkDeleteMode) {
+    if (triggerBtn) triggerBtn.style.display = "none";
+    if (executeBtn) executeBtn.style.display = "inline-block";
+    if (cancelBtn) cancelBtn.style.display = "inline-block";
+  } else {
+    if (triggerBtn) triggerBtn.style.display = "inline-block";
+    if (executeBtn) executeBtn.style.display = "none";
+    if (cancelBtn) cancelBtn.style.display = "none";
+  }
+
+  // リストを再描画して、ゴミ箱マークとチェックボックスを入れ替える
+  renderMainList();
 }
