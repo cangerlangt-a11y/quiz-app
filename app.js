@@ -55,6 +55,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   // 2. その後、画面の状態（どこを開いていたか）を復旧
   loadViewStateOnly();
 
+  // 🌟【新設】ダウンロードと状態復旧が終わった直後に、正しい苦手問題の件数を計算して画面に表示する！
+  updateWrongCountLabel();
+
   if (!window.location.hash || window.location.hash === '#top') {
     navigateTo('#top');
     routeView('#top');
@@ -331,16 +334,25 @@ function renderMainList() {
   if (!container) return;
   container.innerHTML = ""; 
 
-  quizData.forEach((data, index) => {
+  // 🌟【新設】もし「苦手問題」ラジオボタンにチェックが入っていたら、苦手な単語だけに絞り込む
+  const isWrongMode = document.getElementById('modeWrongList') && document.getElementById('modeWrongList').checked;
+  let displayData = quizData;
+  
+  if (isWrongMode) {
+    const wrongIds = getSavedWrongIds();
+    // quizData（すべての単語）の中から、苦手IDリストに含まれているものだけを抽出
+    displayData = quizData.filter(data => wrongIds.includes(data.id));
+  }
+
+  // 💡 以降の描画処理は、絞り込んだ `displayData` をベースに行います
+  displayData.forEach((data, index) => {
     const item = document.createElement('div');
     item.className = "list-item";
     item.setAttribute('draggable', 'true'); 
     item.dataset.id = data.id;
-    item.dataset.index = index; // 🌟 並べ替え用にインデックスを保持
+    item.dataset.index = index; 
 
-    // ---------------------------------------------------------
-    // 🔀 【完全復旧】ドラッグ＆ドロップによる並べ替えイベント
-    // ---------------------------------------------------------
+    // ドラッグ＆ドロップによる並べ替えイベント
     item.addEventListener('dragstart', (e) => {
       item.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
@@ -349,7 +361,6 @@ function renderMainList() {
     item.addEventListener('dragend', async () => {
       item.classList.remove('dragging');
       
-      // 🌟 ドロップが完了した後に、新しい順番（DOMの並び順）を検知して quizData を更新
       const currentItems = Array.from(container.querySelectorAll('.list-item'));
       const newOrderedItems = currentItems.map(el => {
         return quizData.find(d => d.id === parseInt(el.dataset.id));
@@ -357,25 +368,18 @@ function renderMainList() {
 
       quizData = newOrderedItems;
       
-      // アプリ全体のデータ (appData) にも新しい順番を反映させる
       const foundList = appData.find(l => l.listId === currentActiveListId);
       if (foundList) {
         foundList.items = quizData;
       }
-      
-      // ⚠️ もし並び順をSupabase（サーバー側）に保存する関数（例：updateOrderInSupabaseなど）が
-      // 以前あった場合は、ここにその関数を追記してください。なければこのままでアプリ内は並び替わります。
-      
       saveViewState();
     });
 
-    // リスト上の要素の上を通過したときの処理（位置の入れ替え）
     item.addEventListener('dragover', (e) => {
-      e.preventDefault(); // ドロップを許可するために必須
+      e.preventDefault(); 
       const draggingItem = container.querySelector('.dragging');
       if (!draggingItem || draggingItem === item) return;
 
-      // マウスの位置が要素の半分より上か下かで、前に入れるか後ろに入れるかを判定
       const bounding = item.getBoundingClientRect();
       const offset = e.clientY - bounding.top - bounding.height / 2;
       
@@ -385,15 +389,12 @@ function renderMainList() {
         container.insertBefore(draggingItem, item.nextSibling);
       }
       
-      // 画面上の番号 (1., 2., 3...) をリアルタイムに再表示
       container.querySelectorAll('.list-item').forEach((el, idx) => {
         const numSpan = el.querySelector('.list-num');
         if (numSpan) numSpan.textContent = `${idx + 1}.`;
       });
     });
-    // ---------------------------------------------------------
 
-    // クリック時の処理（編集モードなど）
     item.onclick = (e) => {
       if (isBulkDeleteMode) {
         const targetChk = item.querySelector('.bulk-checkbox');
@@ -407,7 +408,6 @@ function renderMainList() {
       }
     };
 
-    // テキスト表示部分
     const textBlock = document.createElement('div');
     textBlock.className = "list-text-block";
     textBlock.innerHTML = `
@@ -416,7 +416,6 @@ function renderMainList() {
     `;
     item.appendChild(textBlock);
 
-    // 右側の削除ボタン・チェックボックス
     const rightActions = document.createElement('div');
     rightActions.className = "list-actions-right";
 
@@ -451,9 +450,10 @@ function renderMainList() {
     container.appendChild(item);
   });
 
-  if (quizData.length > 0) {
+  // 🌟 出題範囲の終了位置も、絞り込んだ現在のリスト数に合わせる
+  if (displayData.length > 0) {
     if(!document.getElementById('rangeEnd').value || document.getElementById('rangeEnd').value == "1") {
-      document.getElementById('rangeEnd').value = quizData.length;
+      document.getElementById('rangeEnd').value = displayData.length;
     }
   }
 }
@@ -689,9 +689,28 @@ function retryQuiz(retryMode) {
 
 function getSavedWrongIds() { return JSON.parse(localStorage.getItem(`chem_wrong_ids_${currentActiveListId}`)) || []; }
 function saveWrongIds(ids) { localStorage.setItem(`chem_wrong_ids_${currentActiveListId}`, JSON.stringify(ids)); updateWrongCountLabel(); }
-function updateWrongCountLabel() { const lbl = document.getElementById('wrongCountLabel'); if(lbl) lbl.textContent = getSavedWrongIds().length; }
-function toggleModeUI() { const area = document.getElementById('normalConfigArea'); if(area) area.style.display = document.getElementById('modeNormal').checked ? 'block' : 'none'; }
+// 🌟【修正】現在開いている単語帳（currentActiveListId）の正しい苦手問題数だけを確実に数えるようにします
+function updateWrongCountLabel() { 
+  const lbl = document.getElementById('wrongCountLabel'); 
+  if (!lbl) return;
 
+  // 現在アクティブなリストIDがない場合は 0 にする
+  if (!currentActiveListId) {
+    lbl.textContent = "0";
+    return;
+  }
+
+  // 現在のリストに紐づく正しい苦手問題の配列を取得して、その「長さ（件数）」を画面に表示
+  const wrongIds = getSavedWrongIds();
+  lbl.textContent = wrongIds.length; 
+}
+function toggleModeUI() { 
+  const area = document.getElementById('normalConfigArea'); 
+  if(area) area.style.display = document.getElementById('modeNormal').checked ? 'block' : 'none'; 
+  
+  // 🌟【新設】モードが切り替わったら、即座に単語リストも書き換える！
+  renderMainList();
+}
 function prepareQuestions() {
   if (quizData.length === 0) { showAlertModal("問題が登録されていません。"); return false; }
   
