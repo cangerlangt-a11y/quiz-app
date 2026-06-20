@@ -341,134 +341,102 @@ async function editListNameInline() {
   saveViewState();
 }
 
+// 💡 余計な処理や無駄な再レンダリングを削ぎ落とした最適化版
 function renderMainList() {
   const container = document.getElementById('listContainer');
   if (!container) return;
-  container.innerHTML = ""; 
+  container.innerHTML = "";
 
-  // 🌟【新設】もし「苦手問題」ラジオボタンにチェックが入っていたら、苦手な単語だけに絞り込む
-  const isWrongMode = document.getElementById('modeWrongList') && document.getElementById('modeWrongList').checked;
-  let displayData = quizData;
-  
-  if (isWrongMode) {
-    const wrongIds = getSavedWrongIds();
-    // quizData（すべての単語）の中から、苦手IDリストに含まれているものだけを抽出
-    displayData = quizData.filter(data => wrongIds.includes(data.id));
+  if (quizData.length === 0) {
+    container.innerHTML = `<div style="text-align:center; color:gray; padding:20px;">問題が登録されていません。</div>`;
+    return;
   }
 
-  // 💡 以降の描画処理は、絞り込んだ `displayData` をベースに行います
-  displayData.forEach((data, index) => {
-    const item = document.createElement('div');
-    item.className = "list-item";
-    item.setAttribute('draggable', 'true'); 
-    item.dataset.id = data.id;
-    item.dataset.index = index; 
+  const isWrongMode = document.getElementById('modeWrongList')?.checked;
+  
+  // 1. 出題モードに応じたフィルタリング
+  const displayItems = isWrongMode 
+    ? quizData.filter(item => getSavedWrongIds().includes(String(item.id)))
+    : quizData;
 
-    // ドラッグ＆ドロップによる並べ替えイベント
-    item.addEventListener('dragstart', (e) => {
-      item.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
+  if (displayItems.length === 0 && isWrongMode) {
+    container.innerHTML = `<div style="text-align:center; color:#009688; padding:20px; font-weight:bold;">🔥 現在、苦手な問題はありません！素晴らしい！🎉</div>`;
+    return;
+  }
 
-    item.addEventListener('dragend', async () => {
-      item.classList.remove('dragging');
-      
-      const currentItems = Array.from(container.querySelectorAll('.list-item'));
-      const newOrderedItems = currentItems.map(el => {
-        return quizData.find(d => d.id === parseInt(el.dataset.id));
-      }).filter(Boolean);
-
-      quizData = newOrderedItems;
-      
-      const foundList = appData.find(l => l.listId === currentActiveListId);
-      if (foundList) {
-        foundList.items = quizData;
-      }
-      saveViewState();
-    });
-
-    item.addEventListener('dragover', (e) => {
-      e.preventDefault(); 
-      const draggingItem = container.querySelector('.dragging');
-      if (!draggingItem || draggingItem === item) return;
-
-      const bounding = item.getBoundingClientRect();
-      const offset = e.clientY - bounding.top - bounding.height / 2;
-      
-      if (offset < 0) {
-        container.insertBefore(draggingItem, item);
-      } else {
-        container.insertBefore(draggingItem, item.nextSibling);
-      }
-      
-      container.querySelectorAll('.list-item').forEach((el, idx) => {
-        const numSpan = el.querySelector('.list-num');
-        if (numSpan) numSpan.textContent = `${idx + 1}.`;
-      });
-    });
-
-    item.onclick = (e) => {
-      if (isBulkDeleteMode) {
-        const targetChk = item.querySelector('.bulk-checkbox');
-        if (targetChk && e.target !== targetChk) {
-          targetChk.checked = !targetChk.checked;
-        }
-      } else {
-        if (!e.target.closest('.direct-delete-btn')) {
-          triggerEditWordModal(data.id, data.question, data.answer);
-        }
-      }
-    };
-
-    const textBlock = document.createElement('div');
-    textBlock.className = "list-text-block";
-    textBlock.innerHTML = `
-      <div><span class="list-num">${index + 1}.</span><span class="list-q">${data.question}</span></div>
-      <span class="list-a">${data.answer}</span>
-    `;
-    item.appendChild(textBlock);
-
-    const rightActions = document.createElement('div');
-    rightActions.className = "list-actions-right";
-
-    const chk = document.createElement('input');
-    chk.type = "checkbox";
-    chk.className = "bulk-checkbox";
-    chk.value = data.id;
-
-    const delBtn = document.createElement('button');
-    delBtn.className = "direct-delete-btn";
-    delBtn.innerHTML = "🗑️";
-    delBtn.title = "この単語を削除";
+  // 2. リストの描画
+  displayItems.forEach((item) => {
+    const originalNum = quizData.findIndex(q => String(q.id) === String(item.id)) + 1;
+    const div = document.createElement('div');
+    div.className = 'list-item';
     
-    if (isBulkDeleteMode) {
-      delBtn.style.display = "none";
-      chk.style.display = "inline-block";
-    } else {
-      delBtn.style.display = "flex";
-      chk.style.display = "none";
+    if (!isWrongMode) {
+      div.draggable = true;
+      div.dataset.id = item.id;
+      setupDragAndDropEvents(div);
     }
-    
-    delBtn.onclick = (e) => { 
-      e.stopPropagation(); 
-      if (isBulkDeleteMode) return;
-      executeDirectDeleteWord(data.id); 
-    };
 
-    rightActions.appendChild(chk);
-    rightActions.appendChild(delBtn);
-    item.appendChild(rightActions);
+    const showCheckbox = (typeof isBulkDeleteMode !== 'undefined' && isBulkDeleteMode);
 
-    container.appendChild(item);
+    div.innerHTML = `
+      <div class="list-num">${originalNum}</div>
+      <div class="list-text-block" onclick="triggerEditWordModal('${item.id}', \`${item.question}\`, \`${item.answer}\`)">
+        <span class="list-q">${item.question}</span>
+        <span class="list-a">${item.answer}</span>
+      </div>
+      <div class="list-actions-right">
+        <input type="checkbox" class="bulk-checkbox" value="${item.id}" style="display: ${showCheckbox ? 'block' : 'none'};">
+        <button class="direct-delete-btn" onclick="openDeleteWordModal('${item.id}')" style="display: ${showCheckbox ? 'none' : 'block'};">🗑️</button>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function setupDragAndDropEvents(element) {
+  element.addEventListener('dragstart', (e) => {
+    element.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
   });
 
-  // 🌟 出題範囲の終了位置も、絞り込んだ現在のリスト数に合わせる
-  if (displayData.length > 0) {
-    if(!document.getElementById('rangeEnd').value || document.getElementById('rangeEnd').value == "1") {
-      document.getElementById('rangeEnd').value = displayData.length;
+  element.addEventListener('dragend', () => {
+    element.classList.remove('dragging');
+    
+    // 💡 無駄な再描画（ループ）を回さず、メモリ上の配列順序だけをスマートに同期
+    const container = document.getElementById('listContainer');
+    const items = [...container.querySelectorAll('.list-item')];
+    quizData = items.map(el => quizData.find(q => String(q.id) === String(el.dataset.id))).filter(Boolean);
+    saveViewState();
+  });
+
+  const container = document.getElementById('listContainer');
+  container.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const draggingElement = document.querySelector('.dragging');
+    if (!draggingElement) return;
+
+    const afterElement = getDragAfterElement(container, e.clientY);
+    if (afterElement == null) {
+      container.appendChild(draggingElement);
+    } else {
+      container.insertBefore(draggingElement, afterElement);
     }
-  }
+  });
 }
+
+function getDragAfterElement(container, y) {
+  const draggableElements = [...container.querySelectorAll('.list-item:not(.dragging)')];
+  return draggableElements.reduce((closest, child) => {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closest.offset) {
+      return { offset: offset, element: child };
+    } else {
+      return closest;
+    }
+  }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
 async function executeDirectDeleteWord(wordId) {
   const { error } = await supabaseClient.from('words').delete().eq('id', wordId);
   if (error) { showAlertModal("削除に失敗しました"); return; }
@@ -759,7 +727,6 @@ function toggleModeUI() {
 function prepareQuestions() {
   if (quizData.length === 0) { showAlertModal("問題が登録されていません。"); return false; }
   
-  // 「すべて出題」にチェックが入っている場合は、ここで強制的に1〜最大数に書き換える
   const targetAllRadio = document.getElementById('targetAll');
   if (targetAllRadio && targetAllRadio.checked) {
     const total = quizData.length > 0 ? quizData.length : 1;
@@ -773,16 +740,16 @@ function prepareQuestions() {
   let endVal = parseInt(document.getElementById('rangeEnd').value) || quizData.length;
   if (startVal > endVal) { showAlertModal("出題範囲の開始が終了を上回っています。"); return false; }
 
-  // 💡 安全対策：通常モード、または苦手モード時のフィルタリング
-  let filtered = document.getElementById('modeNormal').checked ? quizData.slice(startVal - 1, endVal) : quizData.filter(q => getSavedWrongIds().includes(q.id));
+  let filtered = document.getElementById('modeNormal').checked ? quizData.slice(startVal - 1, endVal) : quizData.filter(q => getSavedWrongIds().includes(String(q.id)));
   if (filtered.length === 0) { showAlertModal("出題条件に該当する問題がありません。"); return false; }
 
-  // 「答え ➔ 問題」が選ばれている場合、問題と答えのテキストを入れ替える
+  // 「答え ➔ 問題」が選ばれている場合
   const isReverse = document.getElementById('dirReverse') && document.getElementById('dirReverse').checked;
   if (isReverse) {
     filtered = filtered.map(item => {
       return {
-        ...item,
+        id: item.id, // 🌟 ここで確実にIDを維持！
+        room_id: item.room_id,
         question: item.answer,   
         answer: item.question    
       };
@@ -826,9 +793,13 @@ function resetQuizInput() {
 function checkAnswer() {
   if (inputField.disabled) return;
 
-  let userText = inputField.value; let currentQ = currentQuestions[currentIndex]; let correctAnswer = currentQ.answer;
+  let userText = inputField.value; 
+  let currentQ = currentQuestions[currentIndex]; 
+  let correctAnswer = currentQ.answer;
+  
   function simplify(t) { return t.replaceAll('+','').replaceAll('⁺','').replaceAll('→','').replaceAll('->','').replaceAll(' ',''); }
-  let wrongIds = getSavedWrongIds();
+  
+  let wrongIds = getSavedWrongIds(); // すでに文字列配列として取得される
   let isCorrect = simplify(userText) === simplify(correctAnswer);
 
   quizHistoryLogs.push({ question: currentQ.question, correctAnswer: correctAnswer, userAns: userText, isCorrect: isCorrect });
@@ -839,19 +810,23 @@ function checkAnswer() {
   if (submitBtn) submitBtn.disabled = true;
   if (resetBtn) resetBtn.disabled = true;
 
-  // checkAnswer関数内の「正解・不正解処理」の箇所を以下のようにクリーンアップ
+  // 💡 バグ対策：問題のIDを確実に文字列にする
+  const qIdStr = String(currentQ.id);
+
   if (isCorrect) {
     lastResultFeedbackHTML = `前問の判定: <span class="prev-correct">⭕ 正解</span>（${currentQ.question} ➔ ${correctAnswer}）`;
-    // 💡 String() で確実に型を合わせて削除
-    wrongIds = wrongIds.filter(id => String(id) !== String(currentQ.id));
+    wrongIds = wrongIds.filter(id => String(id) !== qIdStr);
   } else {
     lastResultFeedbackHTML = `前問の判定: <span class="prev-wrong">❌ 不正解</span>（${currentQ.question} ➔ 正解: <span style="color:#2196f3;">${correctAnswer}</span>）`;
     wrongQuestions.push(currentQ);
-    // 💡 String() で確実に存在チェック
-    if (!wrongIds.includes(String(currentQ.id))) wrongIds.push(String(currentQ.id));
+    
+    // 💡 確実に文字列として存在チェックをしてから追加
+    if (!wrongIds.includes(qIdStr)) {
+      wrongIds.push(qIdStr);
+    }
   }
   
-  saveWrongIds(wrongIds);
+  saveWrongIds(wrongIds); // この中で保存と「wrongCountLabel」の更新が走る
   saveViewState();
   
   autoNextTimer = setTimeout(() => {
