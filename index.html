@@ -14,9 +14,14 @@
   <div id="topView" class="app-view" style="display: none;">
     <div class="top-container">
       <div class="config-box" style="background-color: #e0f2f1; border-left: 5px solid #009688;">
-        <p class="config-title" style="color: #004d40; margin-bottom: 10px;">📁 新しい単語帳（リスト）を作る</p>
+        <p class="config-title" style="color: #004d40; margin-bottom: 10px;">📁 新しい単語帳を作る</p>
         <div class="config-form">
-          <input type="text" id="newListName" class="input-style" placeholder="リストの名前（例：無機化学、定期テスト対策）">
+          <input type="text" id="newListName" class="input-style" placeholder="単語帳の名前（例：無機化学、定期テスト対策）"
+                 onkeydown="if(event.key==='Enter'){ event.preventDefault(); document.getElementById('newListTags').focus(); }">
+          
+          <input type="text" id="newListTags" class="input-style" placeholder="タグを入力（カンマ区切り、例: 化学, 定期テスト）" style="margin-top: 8px; margin-bottom: 12px;"
+                 onkeydown="if(event.key==='Enter'){ event.preventDefault(); createNewList(); }">
+          
           <button onclick="createNewList()" class="btn btn-create-list">新しい単語帳を作成 ✨</button>
         </div>
       </div>
@@ -34,27 +39,61 @@
     <div class="title-area" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
       <h2 id="currentListTitle" style="margin: 0; line-height: 1;">単語帳の名前</h2>
       <div style="display: flex; gap: 8px;">
-        <button onclick="openEditListInfoModal()" class="btn-title-edit">✏️ 情報・タグを編集</button>
+        <button onclick="openEditListInfoModal()" class="btn-title-edit">✏️ 名前・タグを編集</button>
       </div>
     </div>
 
-    <div id="currentListTags" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-    </div>
+    <div id="currentListTags" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;"></div>
 
     <div class="main-layout">
       <div class="left-column">
         <div class="config-box" style="background-color: #f3e5f5; border-left: 5px solid #9c27b0;">
-          <p class="config-title" style="color: #7b1fa2; margin-bottom: 10px;">➕ このリストに問題を追加</p>
+          <p class="config-title" style="color: #7b1fa2; margin-bottom: 10px;">➕ この単語帳に問題を追加</p>
           <div class="config-form">
-            <input type="text" id="newQuestion" class="input-style" placeholder="問題（例：塩化水素）" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('newAnswer').focus();}">
             
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-              <span style="font-size: 0.8rem; color: #7b1fa2; font-weight: bold;">答え（化学式など）</span>
-              <span id="hintTextAdd" style="font-size: 0.8rem; color: #2196f3; cursor: pointer; text-decoration: underline; font-weight: bold;" onclick="showChemHelpModal()" id="hintTextAdd">💡 入力ヒントを見る</span>
+            <small id="hintTextAdd" style="color: #2196f3; display: block; margin-bottom: 6px; cursor: pointer; text-decoration: underline; font-weight: bold;" onclick="showChemHelpModal()">💡自動変換とは？</small>
+            
+            <div id="disableChemWrapper_Add" style="margin-bottom: 6px; display: none; align-items: center; gap: 6px;">
+              <input type="checkbox" id="disableChem_Add" onclick="document.getElementById('newQuestion').focus()">
+              <label for="disableChem_Add" style="font-size: 0.85rem; font-weight: bold; color: #e53935; cursor:pointer;">🚫 この問題の自動変換を無効にする</label>
             </div>
-            <input type="text" id="newAnswer" class="input-style" placeholder="例：H2O、Ca2;、SO42-" onkeydown="if(event.key==='Enter'){event.preventDefault(); addNewProblem();}">
+
+            <label style="font-size: 0.85rem; color: #7b1fa2; font-weight: bold;">問題</label>
+            <input type="text" id="newQuestion" class="input-style" placeholder="問題を入力" style="margin-bottom: 12px;">
             
-            <button onclick="addNewProblem()" class="btn btn-add">追加保存する ✨</button>
+            <div style="margin-bottom: 15px; display: flex; gap: 15px; background: rgba(156, 39, 176, 0.08); padding: 8px 12px; border-radius: 6px;">
+              <label style="font-size: 0.9rem; font-weight: bold; color: #7b1fa2; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                <input type="radio" name="subItemMode" value="none" checked onchange="toggleSubItemFormUI()"> 1問1答（小問なし）
+              </label>
+              <label style="font-size: 0.9rem; font-weight: bold; color: #7b1fa2; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                <input type="radio" name="subItemMode" value="exist" onchange="toggleSubItemFormUI()"> 複数小問あり
+              </label>
+            </div>
+
+            <div id="unorderedWrapper_Add" style="margin-bottom: 10px; display: none; align-items: center; gap: 6px;">
+              <input type="checkbox" id="isUnordered_Add">
+              <label for="isUnordered_Add" style="font-size: 0.9rem; font-weight: bold; color: #555; cursor:pointer;">💡 小問の解答を順矛盾にする</label>
+            </div>
+
+            <div id="singleAnswerContainer" style="margin-bottom: 15px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                <label style="font-size: 0.85rem; color: #7b1fa2; font-weight: bold;">答え</label>
+              </div>
+              <input type="text" id="singleAnswerInput" class="input-style" placeholder="答えを入力">
+            </div>
+
+            <div id="multiSubItemContainer" style="margin-bottom: 15px; display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                <span style="font-size: 0.85rem; color: #7b1fa2; font-weight: bold;">📋 小問と答え</span>
+              </div>
+
+              <div id="subItemsContainer_Add" style="margin-bottom: 10px; max-height: 200px; overflow-y: auto;"></div>
+              
+              <button type="button" onclick="addSubItemField('subItemsContainer_Add')" class="btn btn-sub" style="width: 100%; margin-bottom: 12px; background-color: #f3e5f5; border: 1px dashed #9c27b0; color: #7b1fa2;">
+                ➕ 小問を追加する
+              </button>
+            </div>
+            <button onclick="addNewProblem()" class="btn btn-add" style="width: 100%;">この問題を登録保存する ✨</button>
           </div>
         </div>
 
@@ -66,15 +105,15 @@
               <input type="radio" name="modeType" id="modeNormal" checked onclick="toggleModeUI(); saveViewState();"> <label for="modeNormal">通常</label><br>
               <input type="radio" name="modeType" id="modeWrongList" onclick="toggleModeUI(); saveViewState();"> <label for="modeWrongList">🔥 苦手（現在 <span id="wrongCountLabel">0</span> 問）</label>
             </div>
-           <div id="normalConfigArea" class="mode-section" style="border-bottom: none;">
+            <div id="normalConfigArea" class="mode-section" style="border-bottom: none;">
               <label>🎯 出題対象：</label><br>
-              <input type="radio" name="targetType" id="targetAll" checked onclick="toggleCustomSettingsUI(); saveViewState();"> <label for="targetAll">リスト内のすべて</label>
+              <input type="radio" name="targetType" id="targetAll" checked onclick="toggleCustomSettingsUI(); saveViewState();"> <label for="targetAll">単語帳内のすべて</label>
               <input type="radio" name="targetType" id="targetCustom" onclick="toggleCustomSettingsUI(); saveViewState();"> <label for="targetCustom">範囲を指定</label>
               
               <div id="customSettingsArea" style="display: none; margin-top: 10px; padding: 12px; background-color: #f9f9f9; border-radius: 6px; border: 1px solid #eee;">
                 <label style="font-size: 0.9rem; font-weight: bold; color: #555;">📍 出題範囲</label><br>
                 <input type="number" id="rangeStart" class="counter-input" value="1" min="1" onchange="validateCounter(this); saveViewState();"> 問目 ～ 
-<input type="number" id="rangeEnd" class="counter-input" value="1" min="1" onchange="validateCounter(this); saveViewState();"> 問目
+                <input type="number" id="rangeEnd" class="counter-input" value="1" min="1" onchange="validateCounter(this); saveViewState();"> 問目
               </div>
             </div>
 
@@ -137,8 +176,10 @@
         <p id="progress" style="color: gray; font-weight: bold; margin-top: 0; margin-bottom: 10px;"></p>
         <div class="quiz-inner-card">
           <div id="quizBigCardQuestion" class="quiz-q-text">問題読み込み中...</div>
+          
           <div class="quiz-vertical-wrapper">
-            <input type="text" id="chemInput" placeholder="ここに入力" autocomplete="off">
+            <div id="chemInputWrapper" style="width: 100%; margin-bottom: 15px;"></div>
+            
             <div class="quiz-buttons-row">
               <button id="resetBtn" onclick="resetQuizInput()" title="入力をリセット">🧹 クリア</button>
               <button id="submitBtn" onclick="checkAnswer()">解答する ➔</button>
@@ -163,7 +204,7 @@
           </table>
         </div>
         <div style="margin-top: 25px; display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
-          <button onclick="backToMainList()" class="btn btn-sub" style="padding: 12px 30px;">🔙 リストに戻る</button>
+          <button onclick="backToMainList()" class="btn btn-sub" style="padding: 12px 30px;">🔙 単語帳に戻る</button>
           <button id="retryWrongBtn" onclick="retryQuiz('wrong')" class="btn btn-retry" style="padding: 12px 30px;">🔥 間違えた問題をもう一度</button>
           <button onclick="retryQuiz('all')" class="btn btn-action" style="padding: 12px 30px;">🔄 全問題をもう一度</button>
         </div>
@@ -184,16 +225,33 @@
 
   <div id="editWordModal" class="modal-overlay">
     <div class="modal-box">
-      <h3>🛠️ 単語の編集</h3>
+      <h3>🛠️ 問題と小問の編集</h3>
       <div class="modal-flex-inputs">
-        <label><b>問題：</b></label>
-        <input type="text" id="modalEditQ" class="input-style" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('modalEditA').focus();}">
         
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; margin-bottom: 2px;">
-          <label><b>答え（化学式など）：</b></label>
-          <span id="hintTextEdit" style="font-size: 0.8rem; color: #2196f3; cursor: pointer; text-decoration: underline; font-weight: bold;" onclick="showChemHelpModal()" id="hintTextEdit">💡 入力ヒントを見る</span>
+        <small id="hintTextEdit" style="color: #2196f3; display: block; margin-bottom: 6px; cursor: pointer; text-decoration: underline; font-weight: bold;" onclick="showChemHelpModal()">💡自動変換とは？</small>
+
+        <div id="disableChemWrapper_Edit" style="margin-bottom: 6px; display: none; align-items: center; gap: 6px;">
+          <input type="checkbox" id="disableChem_Edit" onclick="document.getElementById('modalEditQ').focus()">
+          <label for="disableChem_Edit" style="font-size: 0.85rem; font-weight: bold; color: #e53935; cursor:pointer;">🚫 この問題の自動変換を無効にする</label>
         </div>
-        <input type="text" id="modalEditA" class="input-style" placeholder="自動変換が適用されます" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('modalConfirmEditBtn').click();}">
+
+        <label><b>問題：</b></label>
+        <input type="text" id="modalEditQ" class="input-style">
+        
+        <div id="unorderedWrapper_Edit" style="margin-top: 10px; margin-bottom: 10px; display: none; align-items: center; gap: 6px;">
+          <input type="checkbox" id="isUnordered_Edit">
+          <label for="isUnordered_Edit" style="font-size: 0.9rem; font-weight: bold; color: #555; cursor:pointer;">💡 小問の解答を順自由にする</label>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; margin-bottom: 5px;">
+          <label><b>📋 登録されている小問と答え</b></label>
+        </div>
+
+        <div id="subItemsContainer_Edit" style="margin-bottom: 10px; max-height: 250px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px;"></div>
+        
+        <button type="button" onclick="addSubItemField('subItemsContainer_Edit')" class="btn btn-sub" style="width: 100%; margin-bottom: 15px; border: 1px dashed #2196f3; color: #2196f3; background: #e3f2fd;">
+          ➕ 小問を追加
+        </button>
       </div>
       <div class="modal-buttons">
         <button onclick="closeModal('editWordModal')" class="btn btn-sub">キャンセル</button>
@@ -204,12 +262,12 @@
 
   <div id="editListInfoModal" class="modal-overlay" style="display: none;">
     <div class="modal-box">
-      <h3>✏️ 単語帳の情報を編集</h3>
+      <h3>✏️ 単語帳の名前を編集</h3>
       <div class="modal-flex-inputs">
         <label><b>単語帳の名前：</b></label>
-        <input type="text" id="modalEditListName" class="input-style" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('modalEditListTags').focus();}">
+        <input type="text" id="modalEditListName" class="input-style">
         <label><b>タグ（カンマ区切り）：</b></label>
-        <input type="text" id="modalEditListTags" class="input-style" placeholder="例: 化学, 1学期, 定期テスト" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('modalConfirmListInfoBtn').click();}">
+        <input type="text" id="modalEditListTags" class="input-style" placeholder="例: 化学, 1学期, 定期テスト">
       </div>
       <div class="modal-buttons">
         <button onclick="closeModal('editListInfoModal')" class="btn btn-sub">キャンセル</button>
@@ -224,7 +282,7 @@
       <p>次に行う操作を選んでください。</p>
       <div class="modal-buttons" style="flex-direction: column; gap: 10px;">
         <button onclick="restartMemorize()" class="btn btn-action" style="width:100%;">🔄 もう一度最初から見る</button>
-        <button onclick="exitMemorize()" class="btn btn-main" style="width:100%; background-color: #009688; color: white;">📋 この単語帳のリストに戻る</button>
+        <button onclick="exitMemorize()" class="btn btn-main" style="width:100%; background-color: #009688; color: white;">📋 単語帳に戻る</button>
       </div>
     </div>
   </div>
@@ -235,6 +293,17 @@
       <p id="alertModalText">メッセージがここに入ります</p>
       <div class="modal-buttons">
         <button type="button" onclick="closeModal('alertModal')" class="btn btn-action" style="width: 100%; background-color: #ef5350; border: none; padding: 12px; color: white; border-radius: 4px; cursor: pointer; font-weight: bold;">確認しました</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="deleteConfirmModal" class="modal-overlay" style="display: none;">  
+    <div class="modal-box" style="background: white; padding: 24px; border-radius: 8px; max-width: 400px; width: 90%; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+      <h3 style="margin-top: 0; color: #e53935;">🗑️ 問題の削除</h3>
+      <p id="deleteConfirmModalText" style="font-size: 0.95rem; color: #333; margin-bottom: 20px; line-height: 1.5;">この問題を削除してもよろしいですか？</p>
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <button type="button" id="deleteModalCancelBtn" class="btn btn-sub" style="padding: 10px 20px; border-radius: 4px; border: 1px solid #ccc; background: #f5f5f5; cursor: pointer;">キャンセル</button>
+        <button type="button" id="deleteModalConfirmBtn" class="btn btn-action" style="padding: 10px 20px; border-radius: 4px; border: none; background: #e53935; color: white; cursor: pointer; font-weight: bold;">削除する</button>
       </div>
     </div>
   </div>

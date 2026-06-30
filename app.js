@@ -1,11 +1,10 @@
 const SUPABASE_URL = 'https://otwqwuidhkbtfniwpzvf.supabase.co'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90d3F3dWlkaGtidGZuaXdwenZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTA0MjYsImV4cCI6MjA5Njk2NjQyNn0.dtPkiYdqo011OpytX6nCvMqiOzrdpEVZ8oj6NXPIsOE'; 
 
-// 💡 名前が被らないように "supabaseClient" に変更しました
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ==========================================
-// 📦 アプリ用変数（LocalStorageの読み込みは廃止し、サーバーと連動します）
+// 📦 アプリ用変数
 // ==========================================
 let appData = []; 
 let currentActiveListId = null; 
@@ -24,148 +23,162 @@ const inputField = document.getElementById('chemInput');
 const progressText = document.getElementById('progress');
 const previousAnswerArea = document.getElementById('previousAnswerArea');
 
-// 画面読み込み時の初期化
+// 🛠️ 丸数字変換用の共通配列（最大15問、超過時は自動フォールバック）
+const CIRCLE_NUMBERS = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮'];
+
+// 便利な要素取得補助関数
+function getElem(id) { return document.getElementById(id); }
+
+// ==========================================
+// 🚀 画面読み込み時の初期化 (エントリーポイント)
+// ==========================================
 window.addEventListener('DOMContentLoaded', async () => {
-  initInputFieldAutoConversion(document.getElementById('chemInput'));  
-  initInputFieldAutoConversion(document.getElementById('newAnswer'));  
-  initInputFieldAutoConversion(document.getElementById('modalEditA')); 
-  
-  // ✨ 単語帳の名前入力欄でEnterキーが押されたら、自動で作成する
-  const newListNameInput = document.getElementById('newListName');
-  if (newListNameInput) {
-    newListNameInput.addEventListener('keydown', function(event) {
-      if (event.key === 'Enter') {
-        if (event.isComposing) return; // 💡 漢字変換を確定するためのEnterキーのときは、作成しない（スルーする）
-        event.preventDefault(); // 画面がリロードされるのを防ぐ
-        createNewList(); // 単語帳を作成する関数を実行！
-      }
-    });
-  }
+  const chemInput = document.getElementById('chemInput');
+  const newAnswer = document.getElementById('newAnswer');
+  const singleAnswerInput = document.getElementById('singleAnswerInput');
+  const modalEditA = document.getElementById('modalEditA');
+
+  if (chemInput) initInputFieldAutoConversion(chemInput);  
+  if (newAnswer) initInputFieldAutoConversion(newAnswer);  
+  if (singleAnswerInput) initInputFieldAutoConversion(singleAnswerInput);
+  if (modalEditA) initInputFieldAutoConversion(modalEditA); 
 
   window.addEventListener('hashchange', () => {
     routeView(window.location.hash);
   });
 
-  // 1. まず最初にSupabaseから最新データをダウンロードする
-  await loadAllAppDataFromSupabase();
-
-// 2. その後、画面の状態（どこを開いていたか）を復旧
-  loadViewStateOnly();
-
-  // 🌟【新設】状態復旧が終わった直後に、正しい苦手問題の計算とリストの絞り込みを確定させる
-  updateWrongCountLabel();
-  renderMainList();
-
-  if (!window.location.hash || window.location.hash === '#top') {
-    navigateTo('#top');
-    routeView('#top');
-  } else {
-    routeView(window.location.hash);
+  try {
+    await loadAllAppDataFromSupabase();
+    loadViewStateOnly();
+  } catch (e) {
+    console.error("初期データ読込エラー:", e);
+  } finally {
+    routeView(window.location.hash || '#top');
   }
-
-  document.addEventListener('click', (e) => {
-    if (window.location.hash.startsWith('#quiz') && inputField && !inputField.disabled) {
-      if (!e.target.closest('button') && e.target !== inputField) {
-        inputField.focus();
-      }
-    }
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (window.location.hash.startsWith('#quiz') && inputField && !inputField.disabled) {
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (document.activeElement !== inputField) {
-          inputField.focus();
-        }
-      }
-    }
-  });
 });
 
 function navigateTo(hash) {
   window.location.hash = hash;
 }
 
-// 🌐 Supabaseから全ての部屋と単語を一括取得して appData の形に整える
+// 🧪【新旧データ共存版】Supabaseから親（問題）と子（小問）をセットで取得する
 async function loadAllAppDataFromSupabase() {
-  const { data: rooms, error: roomError } = await supabaseClient.from('rooms').select('*').order('created_at', { ascending: true });
-  if (roomError) { console.error("部屋の取得失敗:", roomError); return; }
+  const { data: rooms, error: roomError } = await supabaseClient
+    .from('rooms')
+    .select('*')
+    .order('created_at', { ascending: true });
+    
+  if (roomError) { console.error("ルーム取得エラー:", roomError); return; }
 
-  const { data: words, error: wordError } = await supabaseClient.from('words').select('*').order('id', { ascending: true });
-  if (wordError) { console.error("単語の取得失敗:", wordError); return; }
+  const { data: words, error: wordError } = await supabaseClient
+  .from('words')
+  .select('id, room_id, question, answer, sort_order, is_unordered, disable_chem_convert, sub_items(*)')  .order('sort_order', { ascending: true });
+
+  if (wordError) { console.error("単語・小問取得エラー:", wordError); return; }
 
   appData = rooms.map(room => {
     const matchedItems = words ? words.filter(w => w.room_id === room.id) : [];
+    
     return {
       listId: room.id,
       listName: room.title,
-      listTags: room.tags || "",
-      items: matchedItems.map(w => ({ id: w.id, question: w.question, answer: w.answer }))
+      listTags: room.tags || "", 
+      items: matchedItems.map(w => {
+        let finalSubItems = w.sub_items ? w.sub_items.sort((a, b) => a.sort_order - b.sort_order) : [];
+        
+        // 旧仕様（単一答え）のデータがある場合のフォールバック
+        if (finalSubItems.length === 0 && w.answer) {
+          finalSubItems = [{
+            id: `old_${w.id}`,
+            word_id: w.id,
+            sub_question: "答え", 
+            answer: w.answer,
+            sort_order: 0
+          }];
+        }
+
+        return {
+          id: w.id,
+          question: w.question, 
+          is_unordered: w.is_unordered || false,
+          disable_chem_convert: w.disable_chem_convert || false,
+          sub_items: finalSubItems 
+        };
+      })
     };
   });
+
+  console.log("📦 データの同期が完了しました", appData);
 }
 
 function routeView(hash) {
   document.querySelectorAll('.app-view').forEach(v => v.style.display = 'none');
   isBulkDeleteMode = false; 
   
+  // 入力フォームの中身をきれいにリセットする
+  const newQuestion = document.getElementById('newQuestion');
+  const singleAnswerInput = document.getElementById('singleAnswerInput');
+  const subItemsContainer_Add = document.getElementById('subItemsContainer_Add');
+  const newListName = document.getElementById('newListName');
+  
+  if (newQuestion) newQuestion.value = "";
+  if (singleAnswerInput) singleAnswerInput.value = "";
+  if (newListName) newListName.value = "";
+  if (subItemsContainer_Add) subItemsContainer_Add.innerHTML = ""; 
+
   if (document.getElementById('bulkDeleteTriggerBtn')) document.getElementById('bulkDeleteTriggerBtn').style.display = "inline-block";
   if (document.getElementById('bulkExecuteBtn')) document.getElementById('bulkExecuteBtn').style.display = "none";
   if (document.getElementById('bulkCancelBtn')) document.getElementById('bulkCancelBtn').style.display = "none";
 
   if (!hash || hash.startsWith('#top')) {
-    document.getElementById('topView').style.display = 'block';
+    if (document.getElementById('topView')) document.getElementById('topView').style.display = 'block';
     renderTopView();
   } 
   else if (hash.startsWith('#list')) {
     if (!currentActiveListId) { navigateTo('#top'); return; }
-    document.getElementById('mainListView').style.display = 'block';
+    if (document.getElementById('mainListView')) document.getElementById('mainListView').style.display = 'block';
     const foundList = appData.find(l => l.listId === currentActiveListId);
     if (foundList) {
       document.getElementById('currentListTitle').textContent = foundList.listName;
-      // タグがある時だけ余白（marginBottom）を付け、ない時は詰める
       const tArray = foundList.listTags ? foundList.listTags.split(',').map(t=>t.trim()).filter(t=>t) : [];
       const tagsContainer = document.getElementById('currentListTags');
-      if (tArray.length > 0) {
-        tagsContainer.style.marginBottom = '15px';
-        tagsContainer.innerHTML = tArray.map(t => `<span class="list-tag-badge">#${t}</span>`).join(' ');
-      } else {
-        tagsContainer.style.marginBottom = '0px';
-        tagsContainer.innerHTML = '';
+      if (tagsContainer) {
+        if (tArray.length > 0) {
+          tagsContainer.style.marginBottom = '15px';
+          tagsContainer.innerHTML = tArray.map(t => `<span class="list-tag-badge">#${t}</span>`).join(' ');
+        } else {
+          tagsContainer.style.marginBottom = '0px';
+          tagsContainer.innerHTML = '';
+        }
       }
       
       renderMainList();
-      updateChemPlaceholder(); // 💡 画面切り替え時にプレースホルダーを判定
+      updateChemPlaceholder(); 
     }
   } 
   else if (hash.startsWith('#memorize')) {
     if (!currentActiveListId || currentQuestions.length === 0) { navigateTo('#list'); return; }
-    document.getElementById('memorizeView').style.display = 'block';
+    if (document.getElementById('memorizeView')) document.getElementById('memorizeView').style.display = 'block';
     showMemoCard();
-    if (!isCardFront) {
-      const card = document.getElementById('bigCard');
-      card.textContent = currentQuestions[memoIndex].answer;
-      card.classList.add('back-style');
-    }
   } 
   else if (hash.startsWith('#quiz')) {
     if (!currentActiveListId || currentQuestions.length === 0) { navigateTo('#list'); return; }
-    document.getElementById('quizView').style.display = 'block';
-    document.getElementById('quizPlayArea').style.display = 'block';
-    document.getElementById('quizResultArea').style.display = 'none';
+    if (document.getElementById('quizView')) document.getElementById('quizView').style.display = 'block';
+    if (document.getElementById('quizPlayArea')) document.getElementById('quizPlayArea').style.display = 'block';
+    if (document.getElementById('quizResultArea')) document.getElementById('quizResultArea').style.display = 'none';
     showQuestion();
   } 
   else if (hash.startsWith('#result')) {
     if (!currentActiveListId) { navigateTo('#top'); return; }
-    document.getElementById('quizView').style.display = 'block';
-    document.getElementById('quizPlayArea').style.display = 'none';
-    document.getElementById('quizResultArea').style.display = 'block';
+    if (document.getElementById('quizView')) document.getElementById('quizView').style.display = 'block';
+    if (document.getElementById('quizPlayArea')) document.getElementById('quizPlayArea').style.display = 'none';
+    // 💡 以下の行のタイポを修正しました
+    if (document.getElementById('quizResultArea')) document.getElementById('quizResultArea').style.display = 'block';
     showQuizReviewSummary();
   }
 }
 
-function openModal(id) { document.getElementById(id).style.display = 'flex'; }
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+function closeModal(id) { if (document.getElementById(id)) document.getElementById(id).style.display = 'none'; }
 
 function saveViewState() {
   const state = {
@@ -174,7 +187,6 @@ function saveViewState() {
     rangeStart: document.getElementById('rangeStart') ? document.getElementById('rangeStart').value : "1",
     rangeEnd: document.getElementById('rangeEnd') ? document.getElementById('rangeEnd').value : "1",
     orderType: document.getElementById('orderRandom') && document.getElementById('orderRandom').checked ? 'random' : 'normal',
-    // 🌟 修正：前行の末尾にカンマを追加し、構文エラーを解消しました！
     directionType: document.getElementById('dirReverse') && document.getElementById('dirReverse').checked ? 'reverse' : 'normal',
     maxQuestions: document.getElementById('maxQuestions') ? document.getElementById('maxQuestions').value : "",
     currentIndex: currentIndex,
@@ -198,7 +210,7 @@ function loadViewStateOnly() {
 
     if (document.getElementById('modeWrongList')) {
       if (state.modeType === 'wrong') document.getElementById('modeWrongList').checked = true;
-      else document.getElementById('modeNormal').checked = true;
+      else if (document.getElementById('modeNormal')) document.getElementById('modeNormal').checked = true;
       toggleModeUI();
     }
     if (document.getElementById('rangeStart')) document.getElementById('rangeStart').value = state.rangeStart || 1;
@@ -206,13 +218,12 @@ function loadViewStateOnly() {
     
     if (document.getElementById('orderRandom')) {
       if (state.orderType === 'random') document.getElementById('orderRandom').checked = true;
-      else document.getElementById('orderNormal').checked = true;
+      else if (document.getElementById('orderNormal')) document.getElementById('orderNormal').checked = true;
     }
     
-    // 🌟 修正：読み込み処理も安全な形でここに組み込みました！
     if (document.getElementById('dirReverse')) {
       if (state.directionType === 'reverse') document.getElementById('dirReverse').checked = true;
-      else document.getElementById('dirNormal').checked = true;
+      else if (document.getElementById('dirNormal')) document.getElementById('dirNormal').checked = true;
     }
     
     currentIndex = state.currentIndex || 0;
@@ -249,7 +260,7 @@ function renderTopView() {
         <span class="list-title-text">${list.listName}</span>
         <div>${tagsHTML}</div>
       </div>
-      <span class="list-count-badge">${list.items.length} 問収録</span>
+      <span class="list-count-badge">${list.items ? list.items.length : 0} 問収録</span>
     `;
     card.appendChild(infoWrapper);
 
@@ -268,23 +279,26 @@ function renderTopView() {
 }
 
 function triggerDeleteListModal(listId, listName) {
-  document.getElementById('deleteModalText').innerHTML = `本当に単語帳<b>「${listName}」</b>を丸ごと削除してもよろしいですか？<br>この操作は取り消せません。`;
+  if (document.getElementById('deleteModalText')) document.getElementById('deleteModalText').innerHTML = `本当に単語帳<b>「${listName}」</b>を丸ごと削除してもよろしいですか？<br>この操作は取り消せません。`;
   openModal('deleteModal');
   
-  document.getElementById('modalConfirmDeleteBtn').onclick = async () => {
-    await supabaseClient.from('words').delete().eq('room_id', listId);
-    await supabaseClient.from('rooms').delete().eq('id', listId);
-    localStorage.removeItem(`chem_wrong_ids_${listId}`);
-    
-    closeModal('deleteModal');
-    await loadAllAppDataFromSupabase(); 
-    renderTopView();
-    saveViewState();
-  };
+  if (document.getElementById('modalConfirmDeleteBtn')) {
+    document.getElementById('modalConfirmDeleteBtn').onclick = async () => {
+      await supabaseClient.from('words').delete().eq('room_id', listId);
+      await supabaseClient.from('rooms').delete().eq('id', listId);
+      localStorage.removeItem(`chem_wrong_ids_${listId}`);
+      
+      closeModal('deleteModal');
+      await loadAllAppDataFromSupabase(); 
+      renderTopView();
+      saveViewState();
+    };
+  }
 }
 
 async function createNewList() {
   const input = document.getElementById('newListName');
+  if (!input) return;
   const name = input.value.trim();
   if (name === "") return;
 
@@ -303,16 +317,14 @@ function openNotebook(listId) {
   currentActiveListId = listId;
   const foundList = appData.find(l => l.listId === listId);
   if (foundList) {
-    quizData = foundList.items;
+    quizData = foundList.items || [];
 
-    // 🌟【新設】別の単語帳を開いたときは、強制的に「通常モード」にリセットする
     const modeNormalRadio = document.getElementById('modeNormal');
     if (modeNormalRadio) {
-      modeNormalRadio.checked = true; // 通常にチェックを入れる
+      modeNormalRadio.checked = true; 
     }
-    toggleModeUI(); // 出題設定エリアを再表示し、リストを通常表示に戻す
+    toggleModeUI(); 
 
-    // 🌟【新設】新しいリストの件数に合わせて、範囲の初期値と苦手ラベルをセット
     const currentLen = quizData.length > 0 ? quizData.length : 1;
     if (document.getElementById('rangeStart')) document.getElementById('rangeStart').value = 1;
     if (document.getElementById('rangeEnd')) document.getElementById('rangeEnd').value = currentLen;
@@ -336,25 +348,24 @@ async function editListNameInline() {
   if (error) { showAlertModal("名前の変更に失敗しました"); return; }
 
   foundList.listName = trimmed;
-  document.getElementById('currentListTitle').textContent = trimmed;
+  if (document.getElementById('currentListTitle')) document.getElementById('currentListTitle').textContent = trimmed;
   await loadAllAppDataFromSupabase();
   saveViewState();
 }
 
-// 💡 余計な処理や無駄な再レンダリングを削ぎ落とした最適化版
+// 🌟【小問を①で表示対応】メインリスト一覧画面
 function renderMainList() {
   const container = document.getElementById('listContainer');
   if (!container) return;
   container.innerHTML = "";
 
-  if (quizData.length === 0) {
+  if (!quizData || quizData.length === 0) {
     container.innerHTML = `<div style="text-align:center; color:gray; padding:20px;">問題が登録されていません。</div>`;
     return;
   }
 
   const isWrongMode = document.getElementById('modeWrongList')?.checked;
   
-  // 1. 出題モードに応じたフィルタリング
   const displayItems = isWrongMode 
     ? quizData.filter(item => getSavedWrongIds().includes(String(item.id)))
     : quizData;
@@ -364,29 +375,73 @@ function renderMainList() {
     return;
   }
 
-  // 2. リストの描画
+  const showCheckbox = (typeof isBulkDeleteMode !== 'undefined' && isBulkDeleteMode);
+
   displayItems.forEach((item) => {
     const originalNum = quizData.findIndex(q => String(q.id) === String(item.id)) + 1;
     const div = document.createElement('div');
     div.className = 'list-item';
     
-    if (!isWrongMode) {
+    // 💡 【修正】一括削除モードの時はドラッグ（並び替え）を無効化する
+    if (!isWrongMode && !showCheckbox) {
       div.draggable = true;
       div.dataset.id = item.id;
       setupDragAndDropEvents(div);
+    } else {
+      div.draggable = false;
     }
 
-    const showCheckbox = (typeof isBulkDeleteMode !== 'undefined' && isBulkDeleteMode);
+    // 💡 【追加】一括削除モードの時だけ、行全体に「クリックでチェックをトグルする」イベントを付与
+    if (showCheckbox) {
+      div.style.cursor = 'pointer'; // 見た目は変えず、触れることを示すカーソルに
+      div.onclick = (e) => {
+        // ゴミ箱ボタンやチェックボックス自体をクリックした時の二重動作を防止
+        if (e.target.closest('.direct-delete-btn') || e.target.closest('.bulk-checkbox')) return;
+        
+        const cb = div.querySelector('.bulk-checkbox');
+        if (cb) {
+          cb.checked = !cb.checked;
+        }
+      };
+    }
+
+    const subItems = item.sub_items || [];
+    let subItemsHTML = "";
+    
+    if (subItems.length > 1) {
+      subItemsHTML = `<div class="item-sub-list" style="margin-top: 6px; font-size: 0.85rem; color: #555; background: #fafafa; padding: 6px; border-radius: 4px; width: 100%;">`;
+      subItems.forEach((sub, subIdx) => {
+        const numLabel = CIRCLE_NUMBERS[subIdx] || `(${subIdx + 1})`;
+        subItemsHTML += `
+          <div style="margin-bottom: 4px; display:flex; justify-content:space-between; gap: 10px;">
+            <span style="font-weight:bold; color:#666;">${numLabel} ${sub.sub_question}</span>
+            <span style="color:#2196f3; font-weight:bold;">➔ ${sub.answer}</span>
+          </div>
+        `;
+      });
+      subItemsHTML += `</div>`;
+    } else if (subItems.length === 1) {
+      subItemsHTML = `<span class="list-a" style="margin-left: 10px; color: #2196f3; font-weight: bold;">${subItems[0].answer}</span>`;
+    } else {
+      subItemsHTML = `<span class="list-a" style="margin-left: 10px; color: #aaa; font-size:0.85rem;">※小問なし</span>`;
+    }
+
+    const isSingle = subItems.length <= 1;
+
+    // 💡 【修正】一括削除モードの時は、テキストブロック単体の onclick（編集モーダルを開く処理）を無効化する
+    const textBlockOnclick = showCheckbox ? "" : `triggerEditWordModal('${item.id}')`;
 
     div.innerHTML = `
-      <div class="list-num">${originalNum}</div>
-      <div class="list-text-block" onclick="triggerEditWordModal('${item.id}', \`${item.question}\`, \`${item.answer}\`)">
-        <span class="list-q">${item.question}</span>
-        <span class="list-a">${item.answer}</span>
-      </div>
-      <div class="list-actions-right">
-        <input type="checkbox" class="bulk-checkbox" value="${item.id}" style="display: ${showCheckbox ? 'block' : 'none'};">
-        <button class="direct-delete-btn" onclick="openDeleteWordModal('${item.id}')" style="display: ${showCheckbox ? 'none' : 'block'};">🗑️</button>
+      <div style="display: flex; align-items: ${isSingle ? 'center' : 'flex-start'}; justify-content: space-between; width: 100%; gap: 10px;">
+        <div class="list-num" style="${isSingle ? '' : 'margin-top: 2px;'}">${originalNum}</div>
+        <div class="list-text-block" style="flex: 1; cursor: pointer; display: ${isSingle ? 'flex' : 'block'}; justify-content: space-between; align-items: center;" onclick="${textBlockOnclick}">
+          <span class="list-q" style="font-weight: bold; font-size: 1.05rem;">${item.question}</span>
+          ${subItemsHTML}
+        </div>
+        <div class="list-actions-right" style="display: flex; align-items: center; gap: 5px;">
+          <input type="checkbox" class="bulk-checkbox" value="${item.id}" style="display: ${showCheckbox ? 'block' : 'none'};">
+          <button class="direct-delete-btn" onclick="executeDirectDeleteWord('${item.id}')" style="display: ${showCheckbox ? 'none' : 'block'}; background: none; border: none; cursor: pointer;">🗑️</button>
+        </div>
       </div>
     `;
     container.appendChild(div);
@@ -399,29 +454,50 @@ function setupDragAndDropEvents(element) {
     e.dataTransfer.effectAllowed = 'move';
   });
 
-  element.addEventListener('dragend', () => {
+  element.addEventListener('dragend', async () => {
     element.classList.remove('dragging');
     
-    // 💡 無駄な再描画（ループ）を回さず、メモリ上の配列順序だけをスマートに同期
     const container = document.getElementById('listContainer');
     const items = [...container.querySelectorAll('.list-item')];
+    
     quizData = items.map(el => quizData.find(q => String(q.id) === String(el.dataset.id))).filter(Boolean);
+
+    const foundList = appData.find(l => l.listId === currentActiveListId);
+    if (foundList) {
+      foundList.items = [...quizData];
+    }
+
+    renderMainList();
     saveViewState();
+
+    try {
+      const promises = quizData.map((item, index) => {
+        return supabaseClient
+          .from('words') 
+          .update({ sort_order: index }) 
+          .eq('id', item.id);
+      });
+      await Promise.all(promises);
+    } catch (error) {
+      console.error("並び替えの保存に失敗しました:", error);
+    }
   });
 
   const container = document.getElementById('listContainer');
-  container.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    const draggingElement = document.querySelector('.dragging');
-    if (!draggingElement) return;
+  if (container) {
+    container.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const draggingElement = document.querySelector('.dragging');
+      if (!draggingElement) return;
 
-    const afterElement = getDragAfterElement(container, e.clientY);
-    if (afterElement == null) {
-      container.appendChild(draggingElement);
-    } else {
-      container.insertBefore(draggingElement, afterElement);
-    }
-  });
+      const afterElement = getDragAfterElement(container, e.clientY);
+      if (afterElement == null) {
+        container.appendChild(draggingElement);
+      } else {
+        container.insertBefore(draggingElement, afterElement);
+      }
+    });
+  }
 }
 
 function getDragAfterElement(container, y) {
@@ -438,292 +514,277 @@ function getDragAfterElement(container, y) {
 }
 
 async function executeDirectDeleteWord(wordId) {
-  const { error } = await supabaseClient.from('words').delete().eq('id', wordId);
-  if (error) { showAlertModal("削除に失敗しました"); return; }
+  showDeleteConfirmModal("この問題を削除してもよろしいですか？", async () => {
+    const { error } = await supabaseClient.from('words').delete().eq('id', wordId);
+    if (error) { showAlertModal("削除に失敗しました"); return; }
 
-  let wrongIds = getSavedWrongIds();
-  wrongIds = wrongIds.filter(id => id !== wordId);
-  saveWrongIds(wrongIds);
-  
-  await loadAllAppDataFromSupabase();
-  const foundList = appData.find(l => l.listId === currentActiveListId);
-  if (foundList) quizData = foundList.items;
+    let wrongIds = getSavedWrongIds();
+    wrongIds = wrongIds.filter(id => id !== wordId);
+    saveWrongIds(wrongIds);
+    
+    quizData = quizData.filter(item => String(item.id) !== String(wordId));
+    const foundList = appData.find(l => l.listId === currentActiveListId);
+    if (foundList) {
+      foundList.items = quizData;
+    }
 
-  const currentLen = quizData.length > 0 ? quizData.length : 1;
-  document.getElementById('rangeEnd').value = currentLen;
-  if (parseInt(document.getElementById('rangeStart').value) > currentLen) {
-    document.getElementById('rangeStart').value = currentLen;
-  }
-  
-  // 🌟【新設】単語が削除されたので、画面上の「苦手問題数」の表示を最新にする
-  updateWrongCountLabel();
-  
-  renderMainList();
-  saveViewState();
-}
-
-function toggleBulkDeleteMode() {
-  isBulkDeleteMode = !isBulkDeleteMode;
-  const trigger = document.getElementById('bulkDeleteTriggerBtn');
-  const execute = document.getElementById('bulkExecuteBtn');
-  const cancel = document.getElementById('bulkCancelBtn');
-  
-  if (isBulkDeleteMode) {
-    trigger.style.display = "none";
-    execute.style.display = "inline-block";
-    cancel.style.display = "inline-block";
-  } else {
-    trigger.style.display = "inline-block";
-    execute.style.display = "none";
-    cancel.style.display = "none";
-  }
-  renderMainList();
+    const currentLen = quizData.length > 0 ? quizData.length : 1;
+    if (document.getElementById('rangeEnd')) document.getElementById('rangeEnd').value = currentLen;
+    if (document.getElementById('rangeStart') && parseInt(document.getElementById('rangeStart').value) > currentLen) {
+      document.getElementById('rangeStart').value = currentLen;
+    }
+    
+    updateWrongCountLabel();
+    renderMainList();
+    saveViewState();
+  });
 }
 
 async function executeBulkDelete() {
   const checkedBoxes = document.querySelectorAll('#listContainer .bulk-checkbox:checked');
-  if (checkedBoxes.length === 0) { showAlertModal("削除する単語が選択されていません。"); return; }
+  if (checkedBoxes.length === 0) { showAlertModal("削除する問題が選択されていません。"); return; }
 
-  const idsToDelete = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
-  
-  const { error } = await supabaseClient.from('words').delete().in('id', idsToDelete);
-  if (error) { showAlertModal("まとめて削除に失敗しました"); return; }
+  // 💡 【修正】1問削除と同じアプリ独自のカスタムポップアップ（モーダル）を表示します
+  showDeleteConfirmModal(`選択された ${checkedBoxes.length} 件の問題を一括削除しますか？`, async () => {
+    
+    // 👇 ここから先は、ポップアップで「削除する」を押したときに動く処理です
+    const idsToDelete = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+    const idsToDeleteStr = idsToDelete.map(String);
+    
+    const { error } = await supabaseClient.from('words').delete().in('id', idsToDelete);
+    if (error) { showAlertModal("まとめて削除に失敗しました"); return; }
 
-  let wrongIds = getSavedWrongIds();
-  wrongIds = wrongIds.filter(id => !idsToDelete.includes(id));
-  saveWrongIds(wrongIds);
-  
-  await loadAllAppDataFromSupabase();
-  const foundList = appData.find(l => l.listId === currentActiveListId);
-  if (foundList) quizData = foundList.items;
+    let wrongIds = getSavedWrongIds();
+    wrongIds = wrongIds.filter(id => !idsToDeleteStr.includes(id));
+    saveWrongIds(wrongIds);
+    
+    quizData = quizData.filter(item => !idsToDelete.includes(item.id));
+    const foundList = appData.find(l => l.listId === currentActiveListId);
+    if (foundList) {
+      foundList.items = quizData;
+    }
 
-  const currentLen = quizData.length > 0 ? quizData.length : 1;
-  document.getElementById('rangeEnd').value = currentLen;
-  if (parseInt(document.getElementById('rangeStart').value) > currentLen) {
-    document.getElementById('rangeStart').value = currentLen;
-  }
+    const currentLen = quizData.length > 0 ? quizData.length : 1;
+    if (document.getElementById('rangeEnd')) document.getElementById('rangeEnd').value = currentLen;
+    if (document.getElementById('rangeStart') && parseInt(document.getElementById('rangeStart').value) > currentLen) {
+      document.getElementById('rangeStart').value = currentLen;
+    }
 
-  isBulkDeleteMode = false;
-  document.getElementById('bulkDeleteTriggerBtn').style.display = "inline-block";
-  document.getElementById('bulkExecuteBtn').style.display = "none";
-  document.getElementById('bulkCancelBtn').style.display = "none";
-  
-  // 🌟【新設】一括削除されたので、画面上の「苦手問題数」の表示を最新にする
-  updateWrongCountLabel();
-  
-  renderMainList();
-  saveViewState();
+    toggleBulkDeleteMode();
+    updateWrongCountLabel();
+    renderMainList();
+    saveViewState();
+  });
 }
 
-function triggerEditWordModal(id, oldQ, oldA) {
-  document.getElementById('modalEditQ').value = oldQ;
-  document.getElementById('modalEditA').value = oldA;
+function toggleModeUI() { 
+  const area = document.getElementById('normalConfigArea'); 
+  if(area) area.style.display = document.getElementById('modeNormal').checked ? 'block' : 'none'; 
+  renderMainList();
+}
+
+function toggleSubItemFormUI() {
+  const mode = document.querySelector('input[name="subItemMode"]:checked').value;
+  const singleCont = document.getElementById('singleAnswerContainer');
+  const multiCont = document.getElementById('multiSubItemContainer');
+  const unorderedWrapper = document.getElementById('unorderedWrapper_Add');
+
+  if (mode === 'exist') {
+    // 複数小問ありの場合
+    if (singleCont) singleCont.style.display = 'none';
+    if (multiCont) multiCont.style.display = 'block';
+    // 💡 【追加】化学タグに関係なく、小問ありなら順不同ボタンを表示する
+    if (unorderedWrapper) unorderedWrapper.style.display = 'flex'; 
+    
+    // 小問が1つもなければ初期枠を1つ追加する処理などが既存にあればここに続く
+    const container = document.getElementById('subItemsContainer_Add');
+    if (container && container.children.length === 0) {
+      addSubItemField('subItemsContainer_Add');
+    }
+  } else {
+    // 1問1答（小問なし）の場合
+    if (singleCont) singleCont.style.display = 'block';
+    if (multiCont) multiCont.style.display = 'none';
+    // 💡 【追加】小問なしなら順不同ボタンは隠す
+    if (unorderedWrapper) unorderedWrapper.style.display = 'none';
+  }
+}
+
+async function addNewProblem() {
+  const qInput = document.getElementById('newQuestion');
+  const mainQ = qInput.value.trim();
+  const isUnordered = document.getElementById('isUnordered_Add')?.checked || false; // 👈追加 
+  const disableChem = document.getElementById('disableChem_Add')?.checked || false;
+
+  if (!mainQ) { 
+    showAlertModal("問題を入力してください。"); 
+    return; 
+  }
+
+  const mode = document.querySelector('input[name="subItemMode"]:checked').value;
+  let subItemsToInsert = [];
+
+  if (mode === 'none') {
+    const singleAnsInput = document.getElementById('singleAnswerInput');
+    const ansText = singleAnsInput ? singleAnsInput.value.trim() : "";
+    
+    if (!ansText) { 
+      showAlertModal("答えを入力してください。"); 
+      return; 
+    }
+    
+    subItemsToInsert.push({
+      sub_question: "答え",
+      answer: ansText,
+      sort_order: 0
+    });
+  } else {
+    const rows = document.querySelectorAll('#subItemsContainer_Add .sub-item-row');
+    
+    if (rows.length === 0) { 
+      showAlertModal("最低1つ以上の小問を追加してください。"); 
+      return; 
+    }
+    
+    subItemsToInsert = Array.from(rows).map((row, index) => ({
+      sub_question: row.querySelector('.sub-q-input').value.trim() || `小問${index + 1}`,
+      answer: row.querySelector('.sub-a-input').value.trim(),
+      sort_order: index
+    }));
+    
+    if (subItemsToInsert.some(item => !item.answer)) {
+      showAlertModal("答えが空の小問があります。");
+      return;
+    }
+  }
+
+  const { data: insertedWord, error: wordError } = await supabaseClient
+    .from('words')
+    .insert([{ room_id: currentActiveListId, question: mainQ, is_unordered: isUnordered, disable_chem_convert: disableChem }])    .select()
+    .single();
+
+  if (wordError) {
+    showAlertModal("問題の登録に失敗しました: " + wordError.message);
+    return;
+  }
+
+  const finalSubItems = subItemsToInsert.map(sub => ({
+    word_id: insertedWord.id,
+    sub_question: sub.sub_question,
+    answer: sub.answer,
+    sort_order: sub.sort_order
+  }));
+
+  const { error: subError } = await supabaseClient
+    .from('sub_items') 
+    .insert(finalSubItems);
+
+  if (subError) {
+    showAlertModal("小問の登録に失敗しました: " + subError.message);
+    return;
+  }
+
+  qInput.value = "";
+  const singleAnsInput = document.getElementById('singleAnswerInput');
+  if (singleAnsInput) singleAnsInput.value = "";
   
-  updateChemPlaceholder(); // 💡 編集画面を開くときにもプレースホルダーを更新
+  const subContainer = document.getElementById('subItemsContainer_Add');
+  if (subContainer) subContainer.innerHTML = "";
+
+  await loadAllAppDataFromSupabase();
+  const foundList = appData.find(l => l.listId === currentActiveListId);
+  if (foundList) quizData = foundList.items || [];
+  
+  renderMainList();
+  qInput.focus();
+}
+
+async function triggerEditWordModal(id) {
+  const targetItem = quizData.find(item => String(item.id) === String(id));
+  if (!targetItem) return;
+
+  // 問題文をセット
+  document.getElementById('modalEditQ').value = targetItem.question;
+  
+  // 小問コンテナをクリアして再描画
+  const container = document.getElementById('subItemsContainer_Edit');
+  container.innerHTML = ""; 
+
+  if (targetItem.sub_items) {
+    targetItem.sub_items.forEach(sub => {
+      if (typeof addSubItemField === 'function') {
+        addSubItemField('subItemsContainer_Edit', sub.sub_question, sub.answer);
+      }
+    });
+  }
+
+  // 💡 【修正】HTML側の順不同チェックボックスに現在の設定（true/false）を反映
+  if (document.getElementById('isUnordered_Edit')) {
+    document.getElementById('isUnordered_Edit').checked = targetItem.is_unordered || false;
+  }
+
+  if (document.getElementById('disableChem_Edit')) {
+    document.getElementById('disableChem_Edit').checked = targetItem.disable_chem_convert || false;
+  }
+
+  // モーダルを開く
   openModal('editWordModal');
 
+  // 保存ボタンが押された時の処理
   document.getElementById('modalConfirmEditBtn').onclick = async () => {
-    const newQ = document.getElementById('modalEditQ').value.trim();
-    const newA = document.getElementById('modalEditA').value.trim();
-    if (newQ === "" || newA === "") return;
+    // 💡 HTML側のチェックボックスから状態を取得
+    const isUnorderedEdit = document.getElementById('isUnordered_Edit')?.checked || false;
+    const newMainQ = document.getElementById('modalEditQ').value.trim();
+    const disableChemEdit = document.getElementById('disableChem_Edit')?.checked || false; // 💡 追加
+    const rows = document.querySelectorAll('#subItemsContainer_Edit .sub-item-row');
+    
+    if (!newMainQ) {
+      showAlertModal("問題を入力してください。");
+      return;
+    }
+    if (rows.length === 0) { 
+      showAlertModal("小問を1つ以上登録してください。"); 
+      return; 
+    }
 
-    const { error } = await supabaseClient.from('words').update({ question: newQ, answer: newA }).eq('id', id);
-    if (error) { showAlertModal("単語の更新に失敗しました"); return; }
+    // 💡 wordsテーブルの更新（is_unordered も一緒に保存）
+    const { error: pError } = await supabaseClient
+      .from('words')
+      .update({ question: newMainQ, is_unordered: isUnorderedEdit, disable_chem_convert: disableChemEdit })
+      .eq('id', id);
 
+    if (pError) { showAlertModal("更新に失敗しました"); return; }
+
+    // 既存の小問を一旦すべて削除
+    await supabaseClient.from('sub_items').delete().eq('word_id', id);
+
+    // 新しい小問データの組み立て
+    const subItemsToInsert = Array.from(rows).map((row, index) => ({
+      word_id: id,
+      sub_question: row.querySelector('.sub-q-input').value.trim() || `小問${index + 1}`,
+      answer: row.querySelector('.sub-a-input').value.trim(),
+      sort_order: index
+    }));
+
+    // 小問のインサート
+    const { error: cError } = await supabaseClient
+      .from('sub_items')
+      .insert(subItemsToInsert);
+
+    if (cError) { showAlertModal("小問の更新に失敗しました"); return; }
+
+    // モーダルを閉じて画面をリロード
     closeModal('editWordModal');
+
     await loadAllAppDataFromSupabase();
     const foundList = appData.find(l => l.listId === currentActiveListId);
-    if (foundList) quizData = foundList.items;
+    if (foundList) quizData = foundList.items || [];
     
     renderMainList();
     saveViewState();
   };
 }
 
-async function addNewProblem() {
-  const qInput = document.getElementById('newQuestion');
-  const aInput = document.getElementById('newAnswer');
-  if (qInput.value.trim() === "" || aInput.value.trim() === "") return;
-
-  const { error } = await supabaseClient.from('words').insert([
-    { 
-      room_id: currentActiveListId, 
-      question: qInput.value.trim(), 
-      answer: aInput.value.trim() 
-    }
-  ]);
-
-  if (error) { showAlertModal("単語の追加に失敗しました"); return; }
-
-  qInput.value = ""; aInput.value = "";
-  
-  await loadAllAppDataFromSupabase(); 
-  const foundList = appData.find(l => l.listId === currentActiveListId);
-  if (foundList) quizData = foundList.items;
-
-  renderMainList();
-
-  // 🌟【新設】単語が追加されたら、出題範囲の「終了問目」を最新の総問題数に自動更新する
-  if (quizData && quizData.length > 0) {
-    const rEnd = document.getElementById('rangeEnd');
-    if (rEnd) {
-      rEnd.value = quizData.length;
-    }
-  }
-
-  saveViewState();
-  qInput.focus(); 
-}
-
-// 💡 過去の validateCounter を今回の新しい「上限丸めルール」に完全統合します！
-// 💡 入力された問題番号が、単語帳の最大数を超えないように丸める関数
-function validateCounter(inputElement) {
-  if (!inputElement || !currentActiveListId) return;
-  
-  // 1. 現在の単語帳データを取得
-  const list = appData.find(l => l.listId === currentActiveListId);
-  // 🌟 修正：list.words ではなく、実際のデータ構造である list.items の数を数える
-  const total = (list && list.items && list.items.length > 0) ? list.items.length : 1;
-
-  // 2. 入力された値を数値に変換
-  let val = parseInt(inputElement.value);
-
-  // 3. 【判定】もし文字だったり、1未満なら「1」にする
-  if (isNaN(val) || val < 1) {
-    inputElement.value = 1;
-  } 
-  // 4. 【判定】もし最大数を超えていたら、最大数（total）でストップさせる！
-  else if (val > total) {
-    inputElement.value = total;
-  }
-}
-
-function startMemorizeMode() {
-  if (!prepareQuestions()) return;
-  memoIndex = 0;
-  saveViewState();
-  navigateTo('#memorize');
-}
-
-function showMemoCard() {
-  isCardFront = true;
-  const card = document.getElementById('bigCard');
-  if(!card) return;
-  card.classList.remove('back-style');
-  document.getElementById('memoProgress').textContent = `暗記カード： ${memoIndex + 1} / ${currentQuestions.length}`;
-  card.textContent = currentQuestions[memoIndex].question;
-
-  const prevWrapper = document.getElementById('memoPrevBtnWrapper');
-  if(prevWrapper) {
-    prevWrapper.style.visibility = (memoIndex === 0) ? "hidden" : "visible";
-  }
-}
-
-function flipBigCard() {
-  const card = document.getElementById('bigCard');
-  card.textContent = isCardFront ? currentQuestions[memoIndex].answer : currentQuestions[memoIndex].question;
-  card.classList.toggle('back-style', isCardFront);
-  isCardFront = !isCardFront;
-  saveViewState();
-}
-
-function nextMemo() {
-  if (memoIndex < currentQuestions.length - 1) { memoIndex++; showMemoCard(); saveViewState(); } 
-  else { openModal('memoEndModal'); }
-}
-
-function prevMemo() { if (memoIndex > 0) { memoIndex--; showMemoCard(); saveViewState(); } }
-function restartMemorize() { closeModal('memoEndModal'); memoIndex = 0; showMemoCard(); saveViewState(); }
-function exitMemorize() { closeModal('memoEndModal'); backToMainList(); }
-
-function backToMainList() {
-  if (autoNextTimer) clearTimeout(autoNextTimer); 
-  navigateTo('#list');
-}
-
-function startQuizMode() {
-  if (!prepareQuestions()) return;
-  quizHistoryLogs = []; 
-  lastResultFeedbackHTML = ""; 
-  saveViewState();
-  navigateTo('#quiz');
-}
-
-function retryQuiz(retryMode) {
-  if (autoNextTimer) clearTimeout(autoNextTimer);
-  
-  if (retryMode === 'wrong') {
-    const wrongItems = [];
-    quizHistoryLogs.forEach(log => {
-      if (!log.isCorrect) {
-        const match = quizData.find(item => item.question === log.question);
-        if (match) wrongItems.push(match);
-      }
-    });
-    if (wrongItems.length === 0) { showAlertModal("間違えた問題はありません！🎉"); return; }
-    currentQuestions = wrongItems;
-  } else {
-    if (!prepareQuestions()) return;
-  }
-  
-  currentIndex = 0;
-  quizHistoryLogs = [];
-  lastResultFeedbackHTML = "";
-  saveViewState();
-  navigateTo('#quiz');
-  routeView('#quiz'); 
-}
-
-// 💡 LocalStorage から苦手IDを取得（型エラーを防ぐため文字列に統一して処理）
-function getSavedWrongIds() { 
-  const rawData = localStorage.getItem(`chem_wrong_ids_${currentActiveListId}`);
-  return rawData ? JSON.parse(rawData).map(id => String(id)) : []; 
-}
-
-function saveWrongIds(ids) { 
-  // 重複を排除し、すべて文字列に変換して保存
-  const uniqueIds = Array.from(new Set(ids.map(id => String(id))));
-  localStorage.setItem(`chem_wrong_ids_${currentActiveListId}`, JSON.stringify(uniqueIds)); 
-  updateWrongCountLabel(); 
-}
-
-// 🌟【バグ修正版】現在の単語帳に「本当に存在する」苦手問題だけを厳密にカウントする
-function updateWrongCountLabel() { 
-  const lbl = document.getElementById('wrongCountLabel'); 
-  if (!lbl) return;
-
-  if (!currentActiveListId) {
-    lbl.textContent = "0";
-    return;
-  }
-
-  // 1. LocalStorageに保存されている苦手IDを取得
-  const savedWrongIds = getSavedWrongIds();
-
-  // 2. 現在アクティブな単語帳の「本物の全問題データ」を取得
-  const list = appData.find(l => String(l.listId) === String(currentActiveListId));
-  const realItems = (list && list.items) ? list.items : [];
-
-  // 3. LocalStorageのIDのうち、「現在の単語帳に実在する問題のID」だけを抽出する
-  const validWrongIds = savedWrongIds.filter(id => 
-    realItems.some(item => String(item.id) === String(id))
-  );
-
-  // 4. もしゴミデータ（削除済みの問題など）が混ざっていたら、LocalStorage側も綺麗に掃除する
-  if (savedWrongIds.length !== validWrongIds.length) {
-    localStorage.setItem(`chem_wrong_ids_${currentActiveListId}`, JSON.stringify(validWrongIds));
-  }
-
-  // 5. 正しい件数を画面に反映
-  lbl.textContent = validWrongIds.length; 
-}
-function toggleModeUI() { 
-  const area = document.getElementById('normalConfigArea'); 
-  if(area) area.style.display = document.getElementById('modeNormal').checked ? 'block' : 'none'; 
-  
-  // 🌟【新設】モードが切り替わったら、即座に単語リストも書き換える！
-  renderMainList();
-}
 function prepareQuestions() {
   if (quizData.length === 0) { showAlertModal("問題が登録されていません。"); return false; }
   
@@ -743,15 +804,22 @@ function prepareQuestions() {
   let filtered = document.getElementById('modeNormal').checked ? quizData.slice(startVal - 1, endVal) : quizData.filter(q => getSavedWrongIds().includes(String(q.id)));
   if (filtered.length === 0) { showAlertModal("出題条件に該当する問題がありません。"); return false; }
 
-  // 「答え ➔ 問題」が選ばれている場合
   const isReverse = document.getElementById('dirReverse') && document.getElementById('dirReverse').checked;
   if (isReverse) {
     filtered = filtered.map(item => {
+      const subItems = item.sub_items || [];
+      const combinedAnswers = subItems.map(s => s.answer).join('、 ');
       return {
-        id: item.id, // 🌟 ここで確実にIDを維持！
+        id: item.id, 
         room_id: item.room_id,
-        question: item.answer,   
-        answer: item.question    
+        question: combinedAnswers, 
+        sub_items: subItems.map((s, idx) => ({
+          id: s.id,
+          word_id: s.word_id,
+          sub_question: `問題${idx + 1}`,
+          answer: item.question, 
+          sort_order: s.sort_order
+        }))
       };
     });
   }
@@ -766,72 +834,181 @@ function prepareQuestions() {
 
 function showQuestion() {
   if (autoNextTimer) clearTimeout(autoNextTimer); 
-  inputField.value = ""; inputField.disabled = false;
+  
+  const wrapper = document.getElementById('chemInputWrapper');
+  if (!wrapper) return;
+  wrapper.innerHTML = ""; 
+
+  let currentQ = currentQuestions[currentIndex]; 
+  if (progressText) progressText.textContent = `第 ${currentIndex + 1} 問 / 全 ${currentQuestions.length} 問`;
+
+  if (document.getElementById('quizBigCardQuestion')) {
+    document.getElementById('quizBigCardQuestion').textContent = currentQ.question;
+  }
+
+  const subItems = currentQ.sub_items || [];
+
+  if (subItems.length > 0) {
+    subItems.forEach((item, index) => {
+      const subContainer = document.createElement('div');
+      subContainer.style.cssText = 'margin-bottom: 15px; text-align: left; width: 100%;';
+      
+      const numLabel = CIRCLE_NUMBERS[index] || `(${index + 1})`;
+      const label = document.createElement('div');
+      label.textContent = `${numLabel} ${item.sub_question}`;
+      label.style.cssText = 'font-size: 0.95rem; color: #444; margin-bottom: 6px; font-weight: bold;';
+      
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'chem-input-field sub-chem-input';
+      input.id = `chemInput_${index}`;
+      input.dataset.correctAnswer = item.answer; 
+      input.placeholder = "答えを入力";
+      input.style.cssText = 'width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;';
+      
+      if (typeof initInputFieldAutoConversion === 'function') {
+        initInputFieldAutoConversion(input);
+      }
+
+      subContainer.appendChild(label);
+      subContainer.appendChild(input);
+      wrapper.appendChild(subContainer);
+    });
+    
+    setTimeout(() => document.getElementById('chemInput_0')?.focus(), 50);
+
+  } else {
+    const div = document.createElement('div');
+    div.textContent = "※小問が登録されていません。";
+    div.style.color = "#999";
+    wrapper.appendChild(div);
+  }
   
   const submitBtn = document.getElementById('submitBtn');
   const resetBtn = document.getElementById('resetBtn');
   if (submitBtn) submitBtn.disabled = false;
   if (resetBtn) resetBtn.disabled = false;
 
-  progressText.textContent = `第 ${currentIndex + 1} 問 / 全 ${currentQuestions.length} 問`;
-  document.getElementById('quizBigCardQuestion').textContent = currentQuestions[currentIndex].question;
-  
-  if (lastResultFeedbackHTML) {
-    previousAnswerArea.innerHTML = lastResultFeedbackHTML;
-  } else {
-    previousAnswerArea.innerHTML = "";
+  if (previousAnswerArea) {
+    if (lastResultFeedbackHTML) {
+      previousAnswerArea.innerHTML = lastResultFeedbackHTML;
+    } else {
+      previousAnswerArea.innerHTML = "";
+    }
   }
-  
-  inputField.focus();
 }
 
 function resetQuizInput() {
-  inputField.value = "";
-  inputField.focus();
+  const subInputs = document.querySelectorAll('.sub-chem-input');
+  subInputs.forEach(input => input.value = "");
+  document.getElementById('chemInput_0')?.focus();
 }
 
 function checkAnswer() {
-  if (inputField.disabled) return;
-
-  let userText = inputField.value; 
-  let currentQ = currentQuestions[currentIndex]; 
-  let correctAnswer = currentQ.answer;
-  
-  function simplify(t) { return t.replaceAll('+','').replaceAll('⁺','').replaceAll('→','').replaceAll('->','').replaceAll(' ',''); }
-  
-  let wrongIds = getSavedWrongIds(); // すでに文字列配列として取得される
-  let isCorrect = simplify(userText) === simplify(correctAnswer);
-
-  quizHistoryLogs.push({ question: currentQ.question, correctAnswer: correctAnswer, userAns: userText, isCorrect: isCorrect });
-
-  inputField.disabled = true; 
   const submitBtn = document.getElementById('submitBtn');
+  if (submitBtn && submitBtn.disabled) return;
+
+  let currentQ = currentQuestions[currentIndex]; 
+  
+  function simplify(t) { 
+    return t.replaceAll('+','').replaceAll('⁺','').replaceAll('→','').replaceAll('->','').replaceAll(' ','').trim(); 
+  }
+  
+  let isAllCorrect = true;
+  let logDetails = [];
+
+  const subInputs = document.querySelectorAll('.sub-chem-input');
+
+  // 💡 【修正】順不同フラグが true の場合のロジック
+  if (currentQ.is_unordered) {
+    // ユーザーの入力一覧と、正解の一覧を配列として取得
+    let userAnswers = Array.from(subInputs).map(input => input.value.trim());
+    let correctAnswers = Array.from(subInputs).map(input => input.dataset.correctAnswer || "");
+
+    // 判定用に「簡略化（スペースや矢印を削除）した正解のリスト」を作る
+    let simplifiedCorrectList = correctAnswers.map(simplify);
+
+    subInputs.forEach((input, idx) => {
+      let userAns = input.value.trim();
+      let simplifiedUser = simplify(userAns);
+      input.disabled = true;
+
+      // ログ用には元の入力と本来の枠の正解を一旦ペアにしておく
+      logDetails.push({ user: userAns, correct: correctAnswers[idx] });
+
+      // 空欄ではなく、かつ簡略化した正解リストのどこかに一致するか探す
+      const matchIndex = simplifiedCorrectList.indexOf(simplifiedUser);
+
+      if (simplifiedUser !== "" && matchIndex !== -1) {
+        // 一致するものがあった（順不同での正解）
+        input.style.backgroundColor = '#e8f5e9'; 
+        input.style.borderColor = '#66bb6a';
+        // 💡 同じ答えを2回書いて正解になるのを防ぐため、マッチした正解はリストから除外
+        simplifiedCorrectList.splice(matchIndex, 1);
+      } else {
+        // どこにも一致しなかった（不正解）
+        isAllCorrect = false;
+        input.style.backgroundColor = '#ffebee'; 
+        input.style.borderColor = '#ef5350';
+      }
+    });
+
+  } else {
+    // 💡 通常モード（従来の順番通りに判定するロジック）
+    subInputs.forEach((input) => {
+      let userAns = input.value.trim();
+      let srcAns = input.dataset.correctAnswer || "";
+      
+      input.disabled = true; 
+
+      logDetails.push({ user: userAns, correct: srcAns });
+
+      if (simplify(userAns) !== simplify(srcAns)) {
+        isAllCorrect = false;
+        input.style.backgroundColor = '#ffebee'; 
+        input.style.borderColor = '#ef5350';
+      } else {
+        input.style.backgroundColor = '#e8f5e9'; 
+        input.style.borderColor = '#66bb6a';
+      }
+    });
+  }
+
+  // --- 📝 ここから下の履歴保存や苦手登録、0.1秒タイマーのロジックはそのまま維持 ---
+  const logUserStr = logDetails.map(d => d.user || "（未入力）").join('、 ');
+  const logCorrectStr = logDetails.map(d => d.correct).join('、 ');
+
+  quizHistoryLogs.push({ 
+    question: currentQ.question, 
+    correctAnswer: logCorrectStr, 
+    userAns: logUserStr, 
+    isCorrect: isAllCorrect 
+  });
+
+  if (submitBtn) submitBtn.disabled = true;  
   const resetBtn = document.getElementById('resetBtn');
-  if (submitBtn) submitBtn.disabled = true;
   if (resetBtn) resetBtn.disabled = true;
 
-  // 💡 バグ対策：問題のIDを確実に文字列にする
   const qIdStr = String(currentQ.id);
+  let wrongIds = getSavedWrongIds();
 
-  if (isCorrect) {
-    lastResultFeedbackHTML = `前問の判定: <span class="prev-correct">⭕ 正解</span>（${currentQ.question} ➔ ${correctAnswer}）`;
+  if (isAllCorrect) {
+    lastResultFeedbackHTML = `前問: <span class="prev-correct">⭕ 全問正解！</span> 【${currentQ.question}】`;
     wrongIds = wrongIds.filter(id => String(id) !== qIdStr);
   } else {
-    lastResultFeedbackHTML = `前問の判定: <span class="prev-wrong">❌ 不正解</span>（${currentQ.question} ➔ 正解: <span style="color:#2196f3;">${correctAnswer}</span>）`;
+    lastResultFeedbackHTML = `前問: <span class="prev-wrong">❌ 不正解あり</span> 【${currentQ.question}】 <br><small style="color:#555;">正解: ${logCorrectStr}</small>`;
     wrongQuestions.push(currentQ);
-    
-    // 💡 確実に文字列として存在チェックをしてから追加
     if (!wrongIds.includes(qIdStr)) {
       wrongIds.push(qIdStr);
     }
   }
   
-  saveWrongIds(wrongIds); // この中で保存と「wrongCountLabel」の更新が走る
+  saveWrongIds(wrongIds); 
   saveViewState();
   
   autoNextTimer = setTimeout(() => {
     nextQuestion();
-  }, 100);
+  }, 100); // ⚡ 爆速0.1秒移動もバッチリ維持しています
 }
 
 function nextQuestion() {
@@ -842,6 +1019,7 @@ function nextQuestion() {
   } else { 
     saveViewState();
     navigateTo('#result'); 
+    routeView('#result');
   }
 }
 
@@ -851,7 +1029,9 @@ function showQuizReviewSummary() {
   if (retryWrongBtn) {
     retryWrongBtn.style.display = wrongCount > 0 ? "inline-block" : "none";
   }
-  document.getElementById('quizFinalScore').textContent = `🏁 テスト終了！ 正解数: ${quizHistoryLogs.filter(l => l.isCorrect).length} / ${quizHistoryLogs.length}`;
+  if (document.getElementById('quizFinalScore')) {
+    document.getElementById('quizFinalScore').textContent = `🏁 テスト終了！ 正解数: ${quizHistoryLogs.filter(l => l.isCorrect).length} / ${quizHistoryLogs.length}`;
+  }
   switchReviewTab('all'); 
 }
 
@@ -859,10 +1039,12 @@ function switchReviewTab(tabType) {
   const tabAll = document.getElementById('tabAllBtn');
   const tabWrong = document.getElementById('tabWrongBtn');
   if (tabType === 'all') {
-    tabAll.className = "btn btn-action"; tabWrong.className = "btn btn-sub";
+    if (tabAll) tabAll.className = "btn btn-action"; 
+    if (tabWrong) tabWrong.className = "btn btn-sub";
     renderReviewRows(quizHistoryLogs);
   } else {
-    tabAll.className = "btn btn-sub"; tabWrong.className = "btn btn-action";
+    if (tabAll) tabAll.className = "btn btn-sub"; 
+    if (tabWrong) tabWrong.className = "btn btn-action";
     renderReviewRows(quizHistoryLogs.filter(log => !log.isCorrect));
   }
 }
@@ -886,13 +1068,211 @@ function renderReviewRows(logsArray) {
   });
 }
 
-// 現在開いている単語帳に「化学」タグがついているか判定する関数
+function startMemorizeMode() {
+  if (!prepareQuestions()) return;
+  memoIndex = 0;
+  saveViewState();
+  navigateTo('#memorize');
+  routeView('#memorize');
+}
+
+function showMemoCard() {
+  isCardFront = true;
+  const card = document.getElementById('bigCard');
+  if(!card || !currentQuestions[memoIndex]) return;
+  card.classList.remove('back-style');
+  if (document.getElementById('memoProgress')) {
+    document.getElementById('memoProgress').textContent = `暗記カード： ${memoIndex + 1} / ${currentQuestions.length}`;
+  }
+
+  const currentQ = currentQuestions[memoIndex];
+  const subItems = currentQ.sub_items || [];
+  const isReverse = document.getElementById('dirReverse') && document.getElementById('dirReverse').checked;
+
+  if (isReverse) {
+    card.textContent = currentQ.question;
+  } else if (subItems.length > 0) {
+    let qHTML = `<div style="text-align: center; width: 100%;">`;
+    qHTML += `<div style="font-size: 1.6rem; font-weight: bold; margin-bottom: 20px; word-break: break-all;">${currentQ.question}</div>`;
+    subItems.forEach((sub, idx) => {
+      const numLabel = CIRCLE_NUMBERS[idx] || `(${idx + 1})`;
+      qHTML += `<div style="font-size: 1.2rem; color: #444; margin-bottom: 10px; line-height: 1.4;">${numLabel} ${sub.sub_question}</div>`;
+    });
+    qHTML += `</div>`;
+    card.innerHTML = qHTML;
+  } else {
+    card.textContent = currentQ.question;
+  }
+
+  const prevWrapper = document.getElementById('memoPrevBtnWrapper');
+  if(prevWrapper) {
+    prevWrapper.style.visibility = (memoIndex === 0) ? "hidden" : "visible";
+  }
+}
+
+function flipBigCard() {
+  const card = document.getElementById('bigCard');
+  if (!card || !currentQuestions[memoIndex]) return;
+
+  const currentQ = currentQuestions[memoIndex];
+  const subItems = currentQ.sub_items || [];
+  const isReverse = document.getElementById('dirReverse') && document.getElementById('dirReverse').checked;
+
+  if (isFrontView()) {
+    if (isReverse) {
+      if (subItems.length > 0) card.textContent = subItems[0].answer;
+    } else if (subItems.length > 0) {
+      let aHTML = `<div style="text-align: center; width: 100%;">`;
+      subItems.forEach((sub, idx) => {
+        const numLabel = CIRCLE_NUMBERS[idx] || `(${idx + 1})`;
+        aHTML += `<div style="font-size: 1.4rem; font-weight: bold; color: #2196f3; margin-bottom: 12px;">${numLabel} ${sub.answer}</div>`;
+      });
+      aHTML += `</div>`;
+      card.innerHTML = aHTML;
+    } else {
+      card.textContent = "（答えが登録されていません）";
+    }
+    card.classList.add('back-style');
+  } else {
+    if (isReverse) {
+      card.textContent = currentQ.question;
+    } else if (subItems.length > 0) {
+      let qHTML = `<div style="text-align: center; width: 100%;">`;
+      qHTML += `<div style="font-size: 1.6rem; font-weight: bold; margin-bottom: 20px; word-break: break-all;">${currentQ.question}</div>`;
+      subItems.forEach((sub, idx) => {
+        const numLabel = CIRCLE_NUMBERS[idx] || `(${idx + 1})`;
+        qHTML += `<div style="font-size: 1.2rem; color: #444; margin-bottom: 10px; line-height: 1.4;">${numLabel} ${sub.sub_question}</div>`;
+      });
+      qHTML += `</div>`;
+      card.innerHTML = qHTML;
+    } else {
+      card.textContent = currentQ.question;
+    }
+    card.classList.remove('back-style');
+  }
+  
+  toggleCardState();
+  saveViewState();
+}
+
+function isFrontView() {
+  return typeof isCardFront !== 'undefined' ? isCardFront : !document.getElementById('bigCard').classList.contains('back-style');
+}
+function toggleCardState() {
+  if (typeof isCardFront !== 'undefined') {
+    isCardFront = !isCardFront;
+  }
+}
+
+function nextMemo() {
+  if (memoIndex < currentQuestions.length - 1) { 
+    memoIndex++; 
+    showMemoCard(); 
+    saveViewState(); 
+  } else { 
+    openModal('memoEndModal'); 
+  }
+}
+
+function restartMemorize() {
+  closeModal('memoEndModal');
+  memoIndex = 0;
+  showMemoCard();
+  saveViewState();
+}
+
+function exitMemorize() {
+  closeModal('memoEndModal');
+  backToMainList();
+}
+
+function prevMemo() { 
+  if (memoIndex > 0) { 
+    memoIndex--; 
+    showMemoCard(); 
+    saveViewState(); 
+  } 
+}
+
+function backToMainList() {
+  if (autoNextTimer) clearTimeout(autoNextTimer); 
+  navigateTo('#list');
+  routeView('#list');
+}
+
+function startQuizMode() {
+  if (!prepareQuestions()) return;
+  currentIndex = 0;
+  quizHistoryLogs = []; 
+  saveViewState();
+  navigateTo('#quiz');
+  routeView('#quiz');
+}
+
+function retryQuiz(retryMode) {
+  if (autoNextTimer) clearTimeout(autoNextTimer);
+  
+  if (retryMode === 'wrong') {
+    const wrongItems = [];
+    quizHistoryLogs.forEach(log => {
+      if (!log.isCorrect) {
+        const match = quizData.find(item => item.question === log.question);
+        if (match) {
+          wrongItems.push(match);
+        }
+      }
+    });
+    if (wrongItems.length === 0) { showAlertModal("間違えた問題はありません！🎉"); return; }
+    currentQuestions = wrongItems;
+  } else {
+    if (!prepareQuestions()) return;
+  }
+  
+  currentIndex = 0;
+  quizHistoryLogs = [];
+  lastResultFeedbackHTML = "";
+  saveViewState();
+  navigateTo('#quiz');
+  routeView('#quiz'); 
+}
+
+function getSavedWrongIds() { 
+  if (!currentActiveListId) return [];
+  const rawData = localStorage.getItem(`chem_wrong_ids_${currentActiveListId}`);
+  return rawData ? JSON.parse(rawData).map(id => String(id)) : []; 
+}
+
+function saveWrongIds(ids) { 
+  if (!currentActiveListId) return;
+  const uniqueIds = Array.from(new Set(ids.map(id => String(id))));
+  localStorage.setItem(`chem_wrong_ids_${currentActiveListId}`, JSON.stringify(uniqueIds)); 
+  updateWrongCountLabel(); 
+}
+
+function updateWrongCountLabel() { 
+  const lbl = document.getElementById('wrongCountLabel'); 
+  if (!lbl) return;
+
+  if (!currentActiveListId) {
+    lbl.textContent = "0";
+    return;
+  }
+
+  const savedWrongIds = getSavedWrongIds();
+  const list = appData.find(l => String(l.listId) === String(currentActiveListId));
+  const realItems = (list && list.items) ? list.items : [];
+  const validWrongIds = savedWrongIds.filter(id => 
+    realItems.some(item => String(item.id) === String(id))
+  );
+
+  lbl.textContent = validWrongIds.length; 
+}
+
 function hasChemTag() {
   if (!currentActiveListId) return false;
   const currentList = appData.find(l => l.listId === currentActiveListId);
   if (!currentList || !currentList.listTags) return false;
   
-  // カンマ区切りのタグをバラバラにして、「化学」が含まれているか調べる
   const tagsArray = currentList.listTags.split(',').map(t => t.trim());
   return tagsArray.includes('化学');
 }
@@ -911,17 +1291,21 @@ function initInputFieldAutoConversion(targetInput) {
   targetInput.addEventListener('input', function() {
     if (!hasChemTag()) return;
 
+    const isDisableAdd = document.getElementById('disableChem_Add')?.checked;
+    const isDisableEdit = document.getElementById('disableChem_Edit')?.checked;
+    if (isDisableAdd || isDisableEdit) {
+      return; // 自動変換ロジックを通さずに、ここで処理を終了する
+    }
+
     let start = targetInput.selectionStart; 
     let val = targetInput.value;
     
-    // 1. 数字のみリセット
     const revertMap = {
       '₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9',
       '⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9'
     };
     val = val.split('').map(c => revertMap[c] || c).join('');
 
-    // 全角➔半角処理（ここで「ー」も通常のマイナス「-」に変換されます）
     val = val.replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     val = val.replaceAll('；', ';').replaceAll('ー', '-').replaceAll('．', '.').replaceAll(' ”', '"').replaceAll(' ', ' ');
     val = val.replaceAll('＋', '+');
@@ -929,7 +1313,6 @@ function initInputFieldAutoConversion(targetInput) {
     const shiftNumbers = { '!': '1', '"': '2', '#': '3', '$': '4', '%': '5', '&': '6', "'": '7' };
     for (let key in shiftNumbers) { val = val.replaceAll(key, shiftNumbers[key]); }
     
-    // 2. キー置換
     val = val.replaceAll(';', '⁺');
     val = val.replaceAll('-', '⁻');
     val = val.replaceAll('.', '･').replaceAll(' ', '→');
@@ -938,12 +1321,9 @@ function initInputFieldAutoConversion(targetInput) {
     val = val.replaceAll('E-', 'e-');
     val = val.replaceAll('E⁺', 'e⁺');
 
-    // 元素記号処理
     const elements2char = ['He','Li','Be','Ne','Na','Mg','Al','Si','Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr','Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn','Sb','Te','I','Xe','Cs','Ba','Pt','Au','Hg','Pb','Bi','Po','At','Rn','Fr','Ra','U'];
     elements2char.forEach(el => { val = val.replaceAll(el.toUpperCase(), el); });
     
-    // 🌟【新設】1価の多原子イオンの先回り処理
-    // 誤って数字が上付き（価数）に化けないよう、先に数字を下付きに固定してしまいます
     const polyIons = [
       { reg: /HCO3([⁺⁻])/g, rep: 'HCO₃$1' },
       { reg: /NO3([⁺⁻])/g, rep: 'NO₃$1' },
@@ -952,12 +1332,10 @@ function initInputFieldAutoConversion(targetInput) {
       { reg: /ClO3([⁺⁻])/g, rep: 'ClO₃$1' },
       { reg: /ClO4([⁺⁻])/g, rep: 'ClO₄$1' },
       { reg: /MnO4([⁺⁻])/g, rep: 'MnO₄$1' },
-      { reg: /NH4([⁺⁻])/g, rep: 'NH₄$1' } // 陽イオンのアンモニウムも対策！
+      { reg: /NH4([⁺⁻])/g, rep: 'NH₄$1' } 
     ];
     polyIons.forEach(item => { val = val.replace(item.reg, item.rep); });
 
-    // 3. イオン（価数の上付き数字）の変換
-    // （すでに上記で下付き文字「₃」などに変換された部分は、ここの普通の数字の判定をスルーします）
     val = val.replace(/([A-Za-z)\]])(\d+)([⁺⁻])/g, function(match, char, nums, sign) {
       let subPart = "";
       let supPart = "";
@@ -978,7 +1356,6 @@ function initInputFieldAutoConversion(targetInput) {
       return char + convSub + convSup + sign;
     });
 
-    // 4. 残った通常の数字（分子式などの下付き文字）を変換
     let newVal = "";
     for (let i = 0; i < val.length; i++) {
       let char = val[i];
@@ -1007,15 +1384,45 @@ function initInputFieldAutoConversion(targetInput) {
   });
 }
 
-inputField.addEventListener('keydown', function(event) {
-  if (event.key === 'Enter') { 
-    if (event.isComposing) return; 
-    event.preventDefault(); 
+// 🌐 アプリ全体のすべての入力欄（追加・編集・小テストなど）のEnter操作を一括集中管理
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter') return;
+  if (e.isComposing) return; 
+
+  const target = e.target;
+  if (target.tagName !== 'INPUT') return; 
+
+  e.preventDefault(); 
+
+  const allInputs = Array.from(document.querySelectorAll('input[type="text"]')).filter(input => {
+    return input.offsetParent !== null && !input.disabled;
+  });
+
+  const currentIndex = allInputs.indexOf(target);
+
+  if (currentIndex !== -1 && currentIndex < allInputs.length - 1) {
+    allInputs[currentIndex + 1].focus();
+    return;
+  }
+
+  if (target.id === 'newListName') {
+    createNewList(); 
+  } 
+  else if (target.closest('#subItemsContainer_Add') || target.id === 'singleAnswerInput' || target.id === 'newQuestion') {
+    addNewProblem(); 
+  } 
+  else if (target.closest('#subItemsContainer_Edit') || target.id === 'modalEditQ' || target.id === 'modalEditListName' || target.id === 'modalEditListTags') {
+    const editWordBtn = document.getElementById('modalConfirmEditBtn');
+    const editListBtn = document.getElementById('modalConfirmListInfoBtn');
+    
+    if (editWordBtn && editWordBtn.offsetParent !== null) editWordBtn.click();
+    if (editListBtn && editListBtn.offsetParent !== null) editListBtn.click();
+  } 
+  else if (target.classList.contains('sub-chem-input') || target.id === 'chemInput') {
     checkAnswer(); 
   }
 });
 
-// タグの編集・保存
 async function editListTagsInline() {
   const foundList = appData.find(l => l.listId === currentActiveListId);
   if (!foundList) return;
@@ -1032,49 +1439,42 @@ async function editListTagsInline() {
   routeView('#list'); 
 }
 
-// =========================================================
-// ⚠️ この上には、これまでのコード（Supabase設定、単語の追加、クイズ処理など）がそのまま入ります
-// =========================================================
-
-// 💡 名前とタグをまとめて編集・保存するポップアップ処理
 function openEditListInfoModal() {
   const foundList = appData.find(l => l.listId === currentActiveListId);
   if (!foundList) return;
 
-  // 1. 現在の名前とタグをポップアップの入力欄にセットする
   document.getElementById('modalEditListName').value = foundList.listName;
   document.getElementById('modalEditListTags').value = foundList.listTags || "";
 
-  // 2. ポップアップを表示する
   openModal('editListInfoModal');
 
-  // 3. 「保存する」ボタンが押されたときの処理
+  setTimeout(() => {
+    document.getElementById('modalEditListName')?.focus();
+  }, 50); 
+
   document.getElementById('modalConfirmListInfoBtn').onclick = async () => {
     const newName = document.getElementById('modalEditListName').value.trim();
     const newTags = document.getElementById('modalEditListTags').value.trim();
 
     if (newName === "") {
-      showAlertModal("単語帳の名前は空にできません。"); // ✨ alertから書き換え
+      showAlertModal("単語帳の名前は空にできません。"); 
       return;
     }
 
-    // Supabaseのデータを更新
     const { error } = await supabaseClient
       .from('rooms')
       .update({ title: newName, tags: newTags })
       .eq('id', currentActiveListId);
 
     if (error) { 
-      showAlertModal("情報の保存に失敗しました: " + error.message); // ✨ alertから書き換え
+      showAlertModal("情報の保存に失敗しました: " + error.message); 
       return; 
     }
 
-    // アプリ内のデータも更新
     foundList.listName = newName;
     foundList.listTags = newTags;
     document.getElementById('currentListTitle').textContent = newName;
 
-    // 最新のデータを読み直して画面に反映
     await loadAllAppDataFromSupabase();
     updateChemPlaceholder();
     saveViewState();
@@ -1083,30 +1483,29 @@ function openEditListInfoModal() {
   };
 }
 
-// 💡 「化学」タグの有無で入力欄のプレースホルダーとヘルプボタンを切り替える関数
-// 💡 「化学」タグの有無で、入力欄のヒント文字やプレースホルダー、ヘルプボタンを切り替える関数
 function updateChemPlaceholder() {
   if (!currentActiveListId) return;
   const foundList = appData.find(l => l.listId === currentActiveListId);
   if (!foundList) return;
 
-  // 「化学」タグが含まれているかチェック
   const hasChem = foundList.listTags && foundList.listTags.split(',').map(t => t.trim()).includes('化学');
   
-  // 1. 入力欄の薄い文字（プレースホルダー）の切り替え
+  // 💡 【修正】入力ヒントだけは化学タグの有無で表示/非表示を切り替える
+  if (document.getElementById('hintTextAdd')) document.getElementById('hintTextAdd').style.display = hasChem ? 'block' : 'none';
+  if (document.getElementById('hintTextEdit')) document.getElementById('hintTextEdit').style.display = hasChem ? 'block' : 'none';
+  if (document.getElementById('disableChemWrapper_Add')) document.getElementById('disableChemWrapper_Add').style.display = hasChem ? 'flex' : 'none';
+  if (document.getElementById('disableChemWrapper_Edit')) document.getElementById('disableChemWrapper_Edit').style.display = hasChem ? 'flex' : 'none';
+  // 💡 編集モーダル側の順不同ボタンは、編集を開いた時点で常に表示させておく
+  if (document.getElementById('unorderedWrapper_Edit')) document.getElementById('unorderedWrapper_Edit').style.display = 'flex';
+
+  // プレースホルダーのテキスト切り替え
   const placeholderText = hasChem ? "答え（自動変換が適用されます）" : "答え";
   const newAnswerInput = document.getElementById('newAnswer');
   const modalEditAInput = document.getElementById('modalEditA');
   if (newAnswerInput) newAnswerInput.placeholder = placeholderText;
   if (modalEditAInput) modalEditAInput.placeholder = placeholderText;
 
-  // 2. 「💡 入力ヒントを見る」の文字の表示/非表示
-  const hintTextAdd = document.getElementById('hintTextAdd');
-  const hintTextEdit = document.getElementById('hintTextEdit');
-  if (hintTextAdd) hintTextAdd.style.display = hasChem ? 'inline' : 'none';
-  if (hintTextEdit) hintTextEdit.style.display = hasChem ? 'inline' : 'none';
-
-  // 3. 右側の「❓ 自動変換とは？」ボタンの表示/非表示
+  // 化学ヘルプボタンの制御
   let wrapper = document.getElementById('chemHelpBtnWrapper');
   if (hasChem) {
     if (!wrapper) {
@@ -1137,7 +1536,6 @@ function updateChemPlaceholder() {
   }
 }
 
-// 💡 「自動変換とは？」ボタンを押した時に、すべての変換ルールを網羅した説明を表示する関数
 function showChemHelpModal() {
   let chemModal = document.getElementById('chemHelpModal');
   
@@ -1147,7 +1545,6 @@ function showChemHelpModal() {
     chemModal.className = 'modal-overlay';
     chemModal.style.cssText = 'display: flex; justify-content: center; align-items: flex-start; padding-top: 5vh; overflow-y: auto;';
 
-    // ✨ ドラッグ誤作動防止の処理
     let isChemModalMousedown = false;
     chemModal.onmousedown = function(e) { isChemModalMousedown = (e.target === this); };
     chemModal.onclick = function(e) { if (e.target === this && isChemModalMousedown) closeChemHelpModal(); };
@@ -1158,11 +1555,9 @@ function showChemHelpModal() {
     
     modalBox.innerHTML = `
       <h3 style="text-align: center; color: #2196f3; margin-top: 0; margin-bottom: 18px; border-bottom: 2px solid #e3f2fd; padding-bottom: 10px;">🧪 化学式・イオン自動変換マニュアル</h3>
-      
       <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">
         「化学」タグがあるリストでは、キーボードで以下のように打つだけで、自動的に綺麗な化学表記へ変換されます。
       </p>
-      
       <div style="overflow-x: auto; width: 100%;">
         <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 20px; min-width: 420px;">
           <thead>
@@ -1184,12 +1579,10 @@ function showChemHelpModal() {
           </tbody>
         </table>
       </div>
-      
       <p style="font-size: 0.8rem; color: #666; margin: 0 0 15px 0; line-height: 1.4;">
         ※ <b>物質の前の数字（係数）</b>は大文字のまま小さくなりません。<br>
         （例: <code>2H2 + O2 ➔ 2H₂ + O₂ ➔ 2H₂O</code>）
       </p>
-      
       <div class="modal-buttons">
         <button type="button" onclick="closeChemHelpModal()" class="btn btn-action" style="width: 100%; background-color: #2196f3; padding: 12px; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">確認しました！</button>
       </div>
@@ -1202,7 +1595,6 @@ function showChemHelpModal() {
   chemModal.style.display = 'flex';
 }
 
-// 💡 モーダルを閉じる関数
 function closeChemHelpModal() {
   const chemModal = document.getElementById('chemHelpModal');
   if (chemModal) {
@@ -1210,29 +1602,48 @@ function closeChemHelpModal() {
   }
 }
 
-// 💡 ブラウザ標準の showAlertModal() の代わりに、アプリ専用の綺麗なポップアップを出す共通関数
 function showAlertModal(message) {
   const textElem = document.getElementById('alertModalText');
   if (textElem) {
     textElem.textContent = message;
     openModal('alertModal');
   } else {
-    showAlertModal(message); // 万が一HTMLに要素がなければ通常のalertで代用
+    alert(message); 
   }
 }
 
-// 🌟 画面の暗い背景（modal-overlay）をクリックしたときにキャンセルする共通処理（ドラッグ誤作動防止版）
+function showDeleteConfirmModal(message, onConfirm) {
+  const modal = document.getElementById('deleteConfirmModal');
+  const textElem = document.getElementById('deleteConfirmModalText');
+  const cancelBtn = document.getElementById('deleteModalCancelBtn');
+  const confirmBtn = document.getElementById('deleteModalConfirmBtn');
+  
+  if (!modal) {
+    if (confirm(message)) onConfirm();
+    return;
+  }
+
+  textElem.textContent = message;
+  modal.style.display = 'flex';
+
+  confirmBtn.onclick = function() {
+    modal.style.display = 'none';
+    onConfirm(); 
+  };
+
+  cancelBtn.onclick = function() {
+    modal.style.display = 'none';
+  };
+}
+
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
   let isOverlayMousedown = false;
 
-  // 暗い背景部分でマウスを「押し込んだ」かチェック
   overlay.addEventListener('mousedown', function(e) {
     isOverlayMousedown = (e.target === this);
   });
 
-  // マウスを「離した」ときの処理
   overlay.addEventListener('click', function(e) {
-    // 暗い背景で押し始めて、かつ暗い背景で離したときだけ閉じる
     if (e.target === this && isOverlayMousedown) {
       const modalId = this.id;
       if (modalId && typeof closeModal === 'function') {
@@ -1242,11 +1653,6 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
   });
 });
 
-// =========================================================
-// 💡 【新機能】出題対象の「すべて出題 / 範囲指定」を切り替える処理
-// =========================================================
-
-// ① ラジオボタンの選択に合わせて、範囲指定エリアの表示/非表示を切り替える関数
 function toggleCustomSettingsUI() {
   const isCustom = document.getElementById('targetCustom').checked;
   const customArea = document.getElementById('customSettingsArea');
@@ -1254,16 +1660,14 @@ function toggleCustomSettingsUI() {
     customArea.style.display = isCustom ? 'block' : 'none';
   }
 }
-// 💡【新設】「単語をまとめて削除」ボタンを押したときに、チェックボックスの表示を切り替える関数
+
 function toggleBulkDeleteMode() {
-  // モードを反転させる
   isBulkDeleteMode = !isBulkDeleteMode;
 
   const triggerBtn = document.getElementById('bulkDeleteTriggerBtn');
   const executeBtn = document.getElementById('bulkExecuteBtn');
   const cancelBtn = document.getElementById('bulkCancelBtn');
 
-  // ボタン類の表示・非表示を切り替え
   if (isBulkDeleteMode) {
     if (triggerBtn) triggerBtn.style.display = "none";
     if (executeBtn) executeBtn.style.display = "inline-block";
@@ -1274,6 +1678,36 @@ function toggleBulkDeleteMode() {
     if (cancelBtn) cancelBtn.style.display = "none";
   }
 
-  // リストを再描画して、ゴミ箱マークとチェックボックスを入れ替える
   renderMainList();
+}
+
+function addSubItemField(containerId, initialQ = "", initialA = "") {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const div = document.createElement('div');
+  div.className = 'sub-item-row';
+  div.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; align-items: center;';
+  
+  div.innerHTML = `
+    <input type="text" class="sub-q-input" placeholder="小問（例：①触媒は？）" value="${initialQ}" style="flex: 1; padding: 6px;">
+    <input type="text" class="sub-a-input" placeholder="答え（例：V2O5）" value="${initialA}" style="flex: 1; padding: 6px;">
+    <button type="button" onclick="this.parentElement.remove()" style="background:none; border:none; cursor:pointer; font-size:1.2rem; color:#e53935;">🗑️</button>
+  `;
+  
+  const aInput = div.querySelector('.sub-a-input');
+  if (aInput) {
+    initInputFieldAutoConversion(aInput);
+  }
+  
+  container.appendChild(div);
+}
+
+function openModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'flex-start'; 
+    modal.style.paddingTop = '15vh';       
+  }
 }

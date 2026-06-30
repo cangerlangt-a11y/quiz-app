@@ -80,7 +80,7 @@ h2 { color: #2c3e50; margin-top: 0; }
   border: 1px solid #e0e0e0; 
   border-left: 5px solid #2196f3; 
   border-radius: 6px; 
-  padding: 12px 15px; /* 💡 元のパディング幅に統一 */
+  padding: 12px 15px; 
   margin-bottom: 8px; 
   display: flex; 
   align-items: center; 
@@ -89,7 +89,7 @@ h2 { color: #2c3e50; margin-top: 0; }
   cursor: grab; 
   user-select: none; 
   position: relative;
-  min-height: auto; /* 💡 縦幅を元の自然なサイズに固定 */
+  min-height: auto; 
 }
 .list-item:active { cursor: grabbing; }
 .list-item.dragging { opacity: 0.4; background-color: #e3f2fd; }
@@ -103,7 +103,7 @@ h2 { color: #2c3e50; margin-top: 0; }
   align-items: center; 
   justify-content: center; 
   width: 40px; 
-  height: 35px; /* 💡 切り替え時の横・縦ブレを防ぐ固定幅 */
+  height: 35px; 
 }
 .bulk-checkbox { 
   width: 22px; 
@@ -113,11 +113,30 @@ h2 { color: #2c3e50; margin-top: 0; }
   margin: 0; 
 }
 
+/* 🧪 動的に追加される小問登録フォームのスタイル */
+.sub-item-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+  width: 100%;
+}
+
 /* === 🪟 カスタムポップアップ === */
 .modal-overlay {
-  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; 
-  align-items: flex-start; padding-top: 20vh;
+  display: none; 
+  position: fixed; 
+  top: 0; 
+  left: 0; 
+  width: 100%; 
+  height: 100%; 
+  background-color: rgba(0,0,0,0.5); 
+  z-index: 1000; 
+  justify-content: center; 
+  align-items: flex-start; 
+  padding-top: 15vh; /* 🌟【ここを 10vh に調整】 */
 }
+
 .modal-box {
   background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); max-width: 450px; width: 90%; text-align: center; animation: fadeIn 0.2s ease-out;
 }
@@ -126,7 +145,7 @@ h2 { color: #2c3e50; margin-top: 0; }
 .modal-flex-inputs { display: flex; flex-direction: column; gap: 10px; margin: 15px 0; text-align: left; }
 .modal-buttons { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
 
-/* --- 🃏 暗記カード用 ＆ 📝 小テスト画面共通（特大白背景エリアのサイズ統一） --- */
+/* === 🃏 暗記カード用 ＆ 📝 小テスト画面共通 === */
 .memorize-container,
 .quiz-container { 
   max-width: 1500px;
@@ -137,17 +156,17 @@ h2 { color: #2c3e50; margin-top: 0; }
   box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
   text-align: center; 
   position: relative;
-  min-height: 540px; /* 💡 モードを切り替えても白いエリア全体が伸縮しないよう固定 */
+  min-height: 540px; 
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
 }
 
-/* ─── 暗記モード：中央のカード（青枠を維持） ─── */
+/* ─── 暗記モード：中央のカード ─── */
 .big-card { 
   background-color: #fff; 
-  border: 3px solid #3498db; /* 💡 暗記モードのみ、しっかり青枠を表示 */
+  border: 3px solid #3498db; 
   border-radius: 15px; 
   min-height: 220px; 
   display: flex; 
@@ -165,11 +184,11 @@ h2 { color: #2c3e50; margin-top: 0; }
 .big-card.clickable { cursor: pointer; }
 .big-card.back-style { background-color: #e8f4fd; color: #2980b9; border-color: #2980b9; font-size: 2.3rem; }
 
-/* ─── 小テストモード：中央のカード（青枠を取り除く） ─── */
+/* ─── 小テストモード：中央のカード ─── */
 .quiz-inner-card {
   background-color: #fff; 
-  border: 2px solid #fff; /* 💡 小テストの時は青枠を消して、目立たないグレー枠に変更 */
-  border-radius: 30px;
+  border: 2px solid #eee; 
+  border-radius: 15px;
   margin: 20px auto; 
   max-width: 1000px; 
   width: 100%; 
@@ -185,21 +204,27 @@ h2 { color: #2c3e50; margin-top: 0; }
 .quiz-q-text { font-size: 1.8rem; font-weight: bold; color: #2c3e50; word-break: break-all; margin: 10px 0; }
 
 .quiz-vertical-wrapper { width: 100%; display: flex; flex-direction: column; gap: 12px; }
-#chemInput { 
-  font-size: 1.5rem;       /* 文字の大きさ */
-  width: 100%;             /* 横幅いっぱいに広げる */
-  padding: 12px;           /* 入力欄の中の余白 */
-  border: 2px solid #ccc;  /* 💡 入力欄の枠線（グレー） */
-  border-radius: 6px;      /* 角の丸み */
+
+/* 🧪 小問用に生成される全入力エリア共通の美化スタイル */
+#chemInput,
+.sub-chem-input { 
+  font-size: 1.3rem;       
+  width: 100%;             
+  padding: 12px;           
+  border: 2px solid #ccc;  
+  border-radius: 6px;      
   box-sizing: border-box; 
-  text-align: center;      /* 入力する文字を中央寄せ */
+  text-align: left;      
+  transition: border-color 0.2s, background-color 0.2s;
 }
-#chemInput:focus { 
-  border-color: #2196f3;   /* 💡 入力欄をクリックした時に枠線を青くする */
+#chemInput:focus,
+.sub-chem-input:focus { 
+  border-color: #2196f3;   
   outline: none; 
+  background-color: #fafafa;
 }
 
-.quiz-buttons-row { display: flex; gap: 12px; width: 100%; }
+.quiz-buttons-row { display: flex; gap: 12px; width: 100%; margin-top: 10px; }
 #resetBtn { background-color: #cfd8dc; color: #37474f; font-size: 1.1rem; padding: 12px; border-radius: 6px; font-weight: bold; width: 30%; border: none; cursor: pointer; white-space: nowrap; }
 #resetBtn:hover { background-color: #b0bec5; }
 #submitBtn { font-size: 1.1rem; padding: 12px; background-color: #2196f3; color: white; border-radius: 6px; font-weight: bold; width: 70%; border: none; cursor: pointer; white-space: nowrap; }
@@ -212,7 +237,7 @@ h2 { color: #2c3e50; margin-top: 0; }
     margin-top: 35px; 
     padding-top: 15px; 
     border-top: 1px dashed #ddd; 
-    font-size: 1.25rem;   /* 正誤判定の文字の大きさ */
+    font-size: 1.25rem;   
     color: #666; 
     font-weight: bold; 
     min-height: 24px;
@@ -230,9 +255,10 @@ h2 { color: #2c3e50; margin-top: 0; }
   .main-layout { flex-direction: column; }
   .left-column, .right-column { min-width: 100%; }
 }
+
 /* === 🏷️ タグバッジのスタイル === */
 .list-tag-badge {
-  background-color: #ffb74d; /* オレンジ系の可愛い色 */
+  background-color: #ffb74d; 
   color: white;
   padding: 3px 8px;
   border-radius: 12px;
@@ -242,14 +268,18 @@ h2 { color: #2c3e50; margin-top: 0; }
   display: inline-block;
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
+
 /* === 💡 「自動変換とは？」専用モーダルスタイル === */
-#autoConvertModal {
-  padding-top: 5vh !important; /* 上寄りに表示 */
-  overflow-y: auto !important; /* はみ出したらスクロール */
+#autoConvertModal,
+#chemHelpModal {
+  padding-top: 5vh !important; 
+  overflow-y: auto !important; 
+  z-index: 2000 !important;
 }
 
-#autoConvertModal .modal-box {
+#autoConvertModal .modal-box,
+#chemHelpModal .modal-box {
   max-width: 550px !important;
-  margin: 0 auto 5vh auto !important; /* 下部にも余白を持たせる */
-  text-align: left !important; /* 表を見やすく左寄せ */
+  margin: 0 auto 5vh auto !important; 
+  text-align: left !important; 
 }
